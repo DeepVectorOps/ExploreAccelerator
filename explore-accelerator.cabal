@@ -1,0 +1,93 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.38.3.
+--
+-- see: https://github.com/sol/hpack
+
+name:           explore-accelerator
+version:        0.1.0.0
+synopsis:       Replayable explore claims checker (expacc)
+build-type:     Simple
+
+library
+  exposed-modules:
+      Claims
+      Record
+  other-modules:
+      Paths_explore_accelerator
+  hs-source-dirs:
+      src
+  default-extensions:
+      LambdaCase
+      ScopedTypeVariables
+      RecordWildCards
+      OverloadedStrings
+  build-depends:
+      Diff
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , process
+    , string-conversions
+    , text
+    , unix
+  default-language: GHC2021
+
+executable expacc
+  main-is: Main.hs
+  other-modules:
+      Paths_explore_accelerator
+  hs-source-dirs:
+      app
+  default-extensions:
+      LambdaCase
+      ScopedTypeVariables
+      RecordWildCards
+      OverloadedStrings
+  ghc-options: -threaded -Wno-x-partial
+  build-depends:
+      Diff
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , directory
+    , explore-accelerator
+    , filepath
+    , process
+    , string-conversions
+    , text
+    , unix
+  default-language: GHC2021
+
+test-suite spec
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      Test.ClaimsTest
+      Paths_explore_accelerator
+  hs-source-dirs:
+      test
+  default-extensions:
+      LambdaCase
+      ScopedTypeVariables
+      RecordWildCards
+      OverloadedStrings
+  build-depends:
+      Diff
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , directory
+    , explore-accelerator
+    , filepath
+    , hspec
+    , process
+    , string-conversions
+    , text
+    , unix
+  default-language: GHC2021

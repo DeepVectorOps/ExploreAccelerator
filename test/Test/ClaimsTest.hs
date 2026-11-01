@@ -1,0 +1,324 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+module Test.ClaimsTest (spec) where
+
+import Claims
+import Record
+import Control.Exception (IOException, bracket, catch, finally)
+import Data.Aeson (encode, object, (.=))
+import Data.List (isInfixOf)
+import Data.String.Conversions (cs)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import System.Directory
+  ( createDirectory, createDirectoryIfMissing, getTemporaryDirectory, removeDirectoryRecursive )
+import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.FilePath ((</>))
+import System.Posix.Process (getProcessID)
+import Test.Hspec
+
+-- | Fresh temp dir per test.
+withTmp :: (FilePath -> IO a) -> IO a
+withTmp act = do
+  tmp <- getTemporaryDirectory
+  pid <- getProcessID
+  let mk i = do
+        let d = tmp </> ("claims-test-" <> show pid <> "-" <> show (i :: Int))
+        ok <- (createDirectory d >> pure True) `catch` \(_ :: IOException) -> pure False
+        if ok then pure d else mk (i + 1)
+  bracket (mk 0) removeDirectoryRecursive act
+
+claimLine :: Text -> Text -> [Text] -> Maybe [Text] -> Text
+claimLine i t cmd ex =
+  cs . encode $ object $
+    ["id" .= i, "text" .= t, "cmd" .= cmd] <> maybe [] (\e -> ["expect" .= e]) ex
+
+headerLine :: [Text] -> Text
+headerLine ds = cs (encode (object ["depends" .= ds]))
+
+writeClaims :: FilePath -> Text -> [Text] -> IO ()
+writeClaims dir name ls = do
+  createDirectoryIfMissing True (dir </> "claims")
+  TIO.writeFile (dir </> "claims" </> cs name <> ".claims.jsonl") (T.unlines ls)
+
+-- | Claim running rg for "needle" in a file.
+rgClaim :: Text -> FilePath -> Maybe [Text] -> Text
+rgClaim i f = claimLine i ("claim " <> i) ["rg", "-n", "needle", cs f]
+
+verdicts :: [ClaimResult] -> [(Text, Verdict)]
+verdicts rs = [(i, v) | ClaimResult _ (ClaimId i) _ _ v <- rs]
+
+ids :: [ClaimResult] -> [(Text, Text)]
+ids rs = [(n, i) | ClaimResult (ClaimsName n) (ClaimId i) _ _ _ <- rs]
+
+spec :: Spec
+spec = describe "expacc replayable explore claims" $ do
+  describe "parseClaimsName" $ do
+    it "strips .claims.jsonl and .md" $ do
+      parseClaimsName "foo.claims.jsonl" `shouldBe` ClaimsName "foo"
+      parseClaimsName "foo.md" `shouldBe` ClaimsName "foo"
+      parseClaimsName "foo" `shouldBe` ClaimsName "foo"
+
+  describe "parseClaimsFile" $ do
+    let c1 = claimLine "c1" "one" ["ls"] (Just ["x"])
+        c2 = claimLine "c2" "two" ["ls"] Nothing
+    it "parses header and claims" $
+      case parseClaimsFile "f" (T.unlines [headerLine ["other", "o2#id", "o3.md"], c1, c2]) of
+        Right cf -> do
+          cfDepends cf `shouldBe`
+            [WholeFile (ClaimsName "other"), OneClaim (ClaimsName "o2") (ClaimId "id"), WholeFile (ClaimsName "o3")]
+          map claimId (cfClaims cf) `shouldBe` [ClaimId "c1", ClaimId "c2"]
+          map claimExpect (cfClaims cf) `shouldBe` [Just ["x"], Nothing]
+        Left e -> expectationFailure e
+    it "parses doc and commit from the header, with or without depends" $ do
+      let h = cs . encode . object
+      fmap (\cf -> (cfDoc cf, cfCommit cf, cfDepends cf))
+        (parseClaimsFile "f" (T.unlines [h ["doc" .= ("e.md" :: Text), "commit" .= ("abc" :: Text)], c1]))
+        `shouldBe` Right (Just "e.md", Just "abc", [])
+      fmap (\cf -> (cfDoc cf, cfCommit cf, length (cfDepends cf), length (cfClaims cf)))
+        (parseClaimsFile "f" (T.unlines [h ["depends" .= ["x" :: Text], "commit" .= ("abc" :: Text)], c1]))
+        `shouldBe` Right (Nothing, Just "abc", 1, 1)
+    it "parses without header" $
+      fmap (\cf -> (cfDepends cf, length (cfClaims cf))) (parseClaimsFile "f" (T.unlines [c1]))
+        `shouldBe` Right ([], 1)
+    it "rejects a depends object after the first line" $
+      case parseClaimsFile "f" (T.unlines [c1, headerLine ["x"]]) of
+        Left e -> e `shouldSatisfy` ("f:2:" `isInfixOf`)
+        Right _ -> expectationFailure "expected parse error"
+    it "skips blank lines but counts them in line numbers" $ do
+      fmap (length . cfClaims) (parseClaimsFile "f" (T.unlines ["", c1, "   ", c2])) `shouldBe` Right 2
+      case parseClaimsFile "some.claims.jsonl" (T.unlines ["", c1, "", "not json"]) of
+        Left e -> e `shouldSatisfy` ("some.claims.jsonl:4:" `isInfixOf`)
+        Right _ -> expectationFailure "expected parse error"
+
+  describe "checkClaims" $ do
+    let withData body act = withTmp $ \d -> do
+          let f = d </> "data.txt"
+          TIO.writeFile f body
+          act d f
+        run d ls = writeClaims d "t" ls >> checkClaims d [ClaimsName "t"]
+    it "true claim" $ withData "needle one\nhay\nneedle two\n" $ \d f -> do
+      rs <- run d [rgClaim "a" f (Just ["1:needle one", "3:needle two"])]
+      verdicts rs `shouldBe` [("a", VTrue)]
+    it "line-number drift in expect is a Mismatch" $ withData "needle one\nhay\n" $ \d f -> do
+      rs <- run d [rgClaim "a" f (Just ["99:needle one"])]
+      verdicts rs `shouldBe` [("a", VFalse (Mismatch ["99:needle one"] ["1:needle one"]))]
+    it "content change is a Mismatch with diffs" $ withData "needle one\nneedle new\n" $ \d f -> do
+      rs <- run d [rgClaim "a" f (Just ["1:needle one", "2:needle old"])]
+      verdicts rs `shouldBe`
+        [("a", VFalse (Mismatch ["1:needle one", "2:needle old"] ["1:needle one", "2:needle new"]))]
+    it "same lines in another order is Reordered" $ withData "needle one\nneedle two\n" $ \d f -> do
+      rs <- run d [rgClaim "a" f (Just ["2:needle two", "1:needle one"])]
+      verdicts rs `shouldBe`
+        [("a", VFalse (Reordered ["2:needle two", "1:needle one"] ["1:needle one", "2:needle two"]))]
+    it "missing expect is NotRecorded" $ withData "needle\n" $ \d f -> do
+      rs <- run d [rgClaim "a" f Nothing]
+      verdicts rs `shouldBe` [("a", VFalse NotRecorded)]
+    it "rejects an empty command" $ withData "needle\n" $ \d _ -> do
+      rs <- run d [claimLine "empty" "t" [] (Just [])]
+      verdicts rs `shouldBe` [("empty", VFalse (Rejected "empty command"))]
+    it "no-match with expect [] is true" $ withData "hay\n" $ \d f -> do
+      rs <- run d [rgClaim "a" f (Just [])]
+      verdicts rs `shouldBe` [("a", VTrue)]
+    it "rg on a nonexistent file is ExecFailed" $ withData "x\n" $ \d f -> do
+      rs <- run d [rgClaim "a" (f <> ".nope") (Just [])]
+      case verdicts rs of
+        [(_, VFalse (ExecFailed _))] -> pure ()
+        other -> expectationFailure (show other)
+    it "wc -l works" $ withData "a\nb\nc\n" $ \d f -> do
+      rs <- run d [claimLine "w" "t" ["wc", "-l", cs f] (Just ["3 " <> cs f])]
+      verdicts rs `shouldBe` [("w", VTrue)]
+    it "unparseable file yields BadFile" $ withTmp $ \d -> do
+      writeClaims d "t" ["not json"]
+      rs <- checkClaims d [ClaimsName "t"]
+      case verdicts rs of
+        [(_, VFalse (BadFile _))] -> pure ()
+        other -> expectationFailure (show other)
+
+  describe "depends" $ do
+    let withData act = withTmp $ \d -> do
+          let f = d </> "data.txt"
+          TIO.writeFile f "needle\n"
+          act d f
+        good i f = rgClaim i f (Just ["1:needle"])
+        origins rs = [(i, o) | ClaimResult _ (ClaimId i) _ o _ <- rs]
+    it "whole-file dep pulls all claims as Dependency" $ withData $ \d f -> do
+      writeClaims d "a" [headerLine ["b"], good "a1" f]
+      writeClaims d "b" [good "b1" f, good "b2" f]
+      rs <- checkClaims d [ClaimsName "a"]
+      origins rs `shouldBe` [("a1", Target), ("b1", Dependency), ("b2", Dependency)]
+      allTrue rs `shouldBe` True
+    it "#id dep pulls only that claim" $ withData $ \d f -> do
+      writeClaims d "a" [headerLine ["b#b2"], good "a1" f]
+      writeClaims d "b" [good "b1" f, good "b2" f]
+      rs <- checkClaims d [ClaimsName "a"]
+      origins rs `shouldBe` [("a1", Target), ("b2", Dependency)]
+    it "missing dep file is MissingDep" $ withData $ \d f -> do
+      writeClaims d "a" [headerLine ["nope"], good "a1" f]
+      rs <- checkClaims d [ClaimsName "a"]
+      case verdicts rs of
+        [("a1", VTrue), (_, VFalse (MissingDep _))] -> pure ()
+        other -> expectationFailure (show other)
+    it "missing #id is MissingDep" $ withData $ \d f -> do
+      writeClaims d "a" [headerLine ["b#zzz"], good "a1" f]
+      writeClaims d "b" [good "b1" f]
+      rs <- checkClaims d [ClaimsName "a"]
+      case verdicts rs of
+        [("a1", VTrue), ("zzz", VFalse (MissingDep _))] -> pure ()
+        other -> expectationFailure (show other)
+    it "cycle a->b->a terminates, each claim once" $ withData $ \d f -> do
+      writeClaims d "a" [headerLine ["b"], good "a1" f]
+      writeClaims d "b" [headerLine ["a"], good "b1" f]
+      rs <- checkClaims d [ClaimsName "a"]
+      ids rs `shouldBe` [("a", "a1"), ("b", "b1")]
+    it "file as target and dep is evaluated once" $ withData $ \d f -> do
+      writeClaims d "a" [headerLine ["b"], good "a1" f]
+      writeClaims d "b" [good "b1" f]
+      rs <- checkClaims d [ClaimsName "a", ClaimsName "b"]
+      ids rs `shouldBe` [("a", "a1"), ("b", "b1")]
+      origins rs `shouldBe` [("a1", Target), ("b1", Dependency)]
+
+  describe "claims lookup" $ do
+    let withData act = withTmp $ \d -> do
+          let f = d </> "data.txt"
+          TIO.writeFile f "needle\n"
+          act d f
+        good i f = rgClaim i f (Just ["1:needle"])
+        header = cs . encode . object
+    it "resolves a .md name through the doc header" $ withData $ \d f -> do
+      writeClaims d "123" [header ["doc" .= ("my-note.md" :: Text)], good "a1" f]
+      rs <- checkClaims d [parseClaimsName "my-note.md"]
+      verdicts rs `shouldBe` [("a1", VTrue)]
+    it "prefers a claims file named like the doc" $ withData $ \d f -> do
+      writeClaims d "x" [good "direct" f]
+      writeClaims d "y" [header ["doc" .= ("x.md" :: Text)], good "other" f]
+      rs <- checkClaims d [parseClaimsName "x.md"]
+      verdicts rs `shouldBe` [("direct", VTrue)]
+    it "does not read claims files outside claims/" $ withData $ \d f -> do
+      TIO.writeFile (d </> "flat.claims.jsonl") (T.unlines [good "a" f])
+      rs <- checkClaims d [ClaimsName "flat"]
+      case verdicts rs of
+        [(_, VFalse (MissingDep _))] -> pure ()
+        other -> expectationFailure (show other)
+    it "a missing file lists the claims files that exist" $ withData $ \d f -> do
+      writeClaims d "have" [good "a" f]
+      rs <- checkClaims d [ClaimsName "nope"]
+      case verdicts rs of
+        [(_, VFalse (MissingDep m))] -> do
+          m `shouldSatisfy` T.isInfixOf "claims/nope.claims.jsonl"
+          m `shouldSatisfy` T.isInfixOf "have"
+        other -> expectationFailure (show other)
+
+  describe "lint" $ do
+    let withData act = withTmp $ \d -> do
+          let f = d </> "data.txt"
+          TIO.writeFile f "needle\n"
+          act d f
+        good i f = rgClaim i f (Just ["1:needle"])
+        header = cs . encode . object
+    it "check reports unknown header keys, duplicate ids and shell tokens as FALSE" $ withData $ \d f -> do
+      writeClaims d "t"
+        [ header ["doc" .= ("t.md" :: Text), "note" .= ("x" :: Text)]
+        , good "a" f
+        , good "a" f
+        , claimLine "p" "pipe" ["rg", "needle", "|", "wc"] (Just [])
+        ]
+      rs <- checkClaims d [ClaimsName "t"]
+      [m | ClaimResult _ _ _ _ (VFalse (Lint m)) <- rs] `shouldBe`
+        [ "unknown header key: note"
+        , "duplicate claim id: a"
+        , "claim p: cmd is run without a shell, but contains |"
+        ]
+    it "lintFile finds the same problems without running commands" $ withData $ \d f -> do
+      writeClaims d "t" [good "a" f, good "a" f]
+      lintFile d (ClaimsName "t") `shouldReturn` ["duplicate claim id: a"]
+    it "a clean file has no problems" $ withData $ \d f -> do
+      writeClaims d "t" [good "a" f]
+      lintFile d (ClaimsName "t") `shouldReturn` []
+
+  describe "record" $ do
+    let nc i f = NewClaim i ("claim " <> i) ["rg", "-n", "needle", cs f]
+        noHeader = Header Nothing Nothing []
+        withData act = withTmp $ \d -> do
+          let f = d </> "data.txt"
+          TIO.writeFile f "needle one\nhay\nneedle two\n"
+          act d f
+    it "record stores the command output as expect and the claim then checks TRUE" $ withData $ \d f -> do
+      Right msg <- recordNew d (ClaimsName "r") noHeader (nc "a" f)
+      msg `shouldSatisfy` T.isInfixOf "(2 lines)"
+      msg `shouldSatisfy` T.isInfixOf "1:needle one"
+      rs <- checkClaims d [ClaimsName "r"]
+      verdicts rs `shouldBe` [("a", VTrue)]
+    it "record writes the header, and refuses to overwrite an existing file" $ withData $ \d f -> do
+      Right _ <- recordNew d (ClaimsName "r") (Header (Just "r.md") (Just "abc") ["dep"]) (nc "a" f)
+      Right cf <- parseClaimsFile "r" <$> TIO.readFile (d </> "claims" </> "r.claims.jsonl")
+      (cfDoc cf, cfCommit cf, cfDepends cf) `shouldBe` (Just "r.md", Just "abc", [WholeFile (ClaimsName "dep")])
+      Left e <- recordNew d (ClaimsName "r") noHeader (nc "b" f)
+      e `shouldSatisfy` T.isInfixOf "record-append"
+    it "record does not write anything when the command fails" $ withData $ \d f -> do
+      Left e <- recordNew d (ClaimsName "r") noHeader (nc "a" (f <> ".nope"))
+      e `shouldSatisfy` T.isInfixOf "nothing recorded"
+      recordAppend d (ClaimsName "r") (nc "a" f) >>= (`shouldSatisfy` either (const True) (const False))
+    it "record-append adds a claim and rejects a duplicate id" $ withData $ \d f -> do
+      Right _ <- recordNew d (ClaimsName "r") noHeader (nc "a" f)
+      Right _ <- recordAppend d (ClaimsName "r") (nc "b" f)
+      Left e <- recordAppend d (ClaimsName "r") (nc "b" f)
+      e `shouldSatisfy` T.isInfixOf "record-fix"
+      rs <- checkClaims d [ClaimsName "r"]
+      verdicts rs `shouldBe` [("a", VTrue), ("b", VTrue)]
+    it "record-fix rewrites only that claim's expect and shows the diff" $ withData $ \d f -> do
+      Right _ <- recordNew d (ClaimsName "r") (Header (Just "r.md") Nothing []) (nc "a" f)
+      Right _ <- recordAppend d (ClaimsName "r") (nc "b" f)
+      TIO.writeFile f "needle one\nhay\nneedle changed\n"
+      Right msg <- recordFix d (ClaimsName "r") "b"
+      msg `shouldSatisfy` T.isInfixOf "    - 3:needle two"
+      msg `shouldSatisfy` T.isInfixOf "    + 3:needle changed"
+      rs <- checkClaims d [ClaimsName "r"]
+      verdicts rs `shouldBe` [("a", VFalse (Mismatch ["1:needle one", "3:needle two"] ["1:needle one", "3:needle changed"])), ("b", VTrue)]
+      recordFix d (ClaimsName "r") "b" >>= (`shouldSatisfy` either (const False) (T.isPrefixOf "unchanged"))
+    it "record-fix on an unknown id fails" $ withData $ \d f -> do
+      Right _ <- recordNew d (ClaimsName "r") noHeader (nc "a" f)
+      recordFix d (ClaimsName "r") "zzz" >>= (`shouldSatisfy` either (T.isInfixOf "no claim zzz") (const False))
+
+  describe "renderResults" $ do
+    let t = ClaimResult (ClaimsName "f") (ClaimId "t1") "good" Target VTrue
+        d = ClaimResult (ClaimsName "g") (ClaimId "d1") "dep bad" Dependency
+              (VFalse (Mismatch ["gone"] ["new"]))
+        rs = [t, d]
+        out m = renderResults m rs
+    it "PrintFalse hides TRUE rows" $ do
+      out PrintFalse `shouldSatisfy` (not . T.isInfixOf "TRUE")
+      out PrintFalse `shouldSatisfy` T.isInfixOf "FALSE g#d1 (dep)"
+    it "PrintTrue hides FALSE rows" $ do
+      out PrintTrue `shouldSatisfy` T.isInfixOf "TRUE  f#t1"
+      out PrintTrue `shouldSatisfy` (not . T.isInfixOf "FALSE")
+    it "PrintAll shows both, with summary" $ do
+      out PrintAll `shouldSatisfy` T.isInfixOf "TRUE"
+      out PrintAll `shouldSatisfy` T.isInfixOf "FALSE"
+      out PrintAll `shouldSatisfy` T.isInfixOf "1 true, 1 false"
+      out PrintFalse `shouldSatisfy` T.isInfixOf "1 true, 1 false"
+    it "ends with OK or FAILED" $ do
+      out PrintAll `shouldSatisfy` T.isInfixOf "FAILED: 1 true, 1 false"
+      renderResults PrintAll [t] `shouldSatisfy` T.isInfixOf "OK: 1 true, 0 false"
+    it "diff keeps two lines of context and drops the rest" $ do
+      let ls = ["l" <> T.pack (show i) | i <- [1 .. 10 :: Int]]
+          r = ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target
+                (VFalse (Mismatch ls (take 9 ls <> ["new"])))
+          txt = renderResults PrintFalse [r]
+      txt `shouldSatisfy` T.isInfixOf "      l8\n      l9\n    - l10\n    + new"
+      txt `shouldSatisfy` (not . T.isInfixOf "l1\n")
+    it "renders diff lines under a mismatch" $ do
+      out PrintAll `shouldSatisfy` T.isInfixOf "    - gone"
+      out PrintAll `shouldSatisfy` T.isInfixOf "    + new"
+    it "TRUE rows of Target have no (dep) marker" $
+      out PrintTrue `shouldSatisfy` (not . T.isInfixOf "(dep)")
+
+  describe "resolveExploreDir" $
+    it "honours EXPACC_DIR and falls back to default" $ do
+      old <- lookupEnv "EXPACC_DIR"
+      let restore = maybe (unsetEnv "EXPACC_DIR") (setEnv "EXPACC_DIR") old
+      (do setEnv "EXPACC_DIR" "/some/dir"
+          resolveExploreDir >>= (`shouldBe` "/some/dir")
+          unsetEnv "EXPACC_DIR"
+          resolveExploreDir >>= (`shouldBe` "./live-docs/explore")) `finally` restore

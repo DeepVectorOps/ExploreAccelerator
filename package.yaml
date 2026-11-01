@@ -1,0 +1,45 @@
+name: explore-accelerator
+version: 0.1.0.0
+synopsis: Replayable explore claims checker (expacc)
+
+language: GHC2021
+
+default-extensions:
+- LambdaCase
+- ScopedTypeVariables
+- RecordWildCards
+- OverloadedStrings
+
+dependencies:
+- base
+- bytestring
+- aeson
+- containers
+- Diff
+- directory
+- filepath
+- process
+- string-conversions
+- text
+- unix
+
+library:
+  source-dirs: src
+
+executables:
+  expacc:
+    main: Main.hs
+    source-dirs: app
+    dependencies:
+    - explore-accelerator
+    ghc-options:
+    - -threaded
+    - -Wno-x-partial
+
+tests:
+  spec:
+    main: Main.hs
+    source-dirs: test
+    dependencies:
+    - explore-accelerator
+    - hspec

@@ -33,6 +33,7 @@ library
     , process
     , string-conversions
     , text
+    , transformers
     , unix
   default-language: GHC2021
 
@@ -60,6 +61,7 @@ executable expacc
     , process
     , string-conversions
     , text
+    , transformers
     , unix
   default-language: GHC2021
 
@@ -89,5 +91,6 @@ test-suite spec
     , process
     , string-conversions
     , text
+    , transformers
     , unix
   default-language: GHC2021

@@ -1,17 +1,16 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main (main) where
 
 import Claims
 import Record
 import Data.List (partition)
+import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitWith)
-import System.IO (hPutStrLn, stderr)
+import System.IO (stderr)
 
 usage :: Text
 usage =
@@ -34,14 +33,14 @@ data Flags = Flags
   }
 
 parseFlags :: [Text] -> Either Text Flags
-parseFlags = go (Flags Nothing Nothing (Header Nothing Nothing []))
+parseFlags = go (Flags Nothing Nothing emptyHeader)
   where
     go f [] = Right f
     go f ("--id" : v : r) = go f {fId = Just v} r
     go f ("--text" : v : r) = go f {fText = Just v} r
     go f ("--doc" : v : r) = go f {fHeader = (fHeader f) {hDoc = Just v}} r
     go f ("--commit" : v : r) = go f {fHeader = (fHeader f) {hCommit = Just v}} r
-    go f ("--depends" : v : r) = go f {fHeader = (fHeader f) {hDepends = hDepends (fHeader f) <> [v]}} r
+    go f ("--depends" : v : r) = go f {fHeader = (fHeader f) {hDepends = hDepends (fHeader f) <> [parseDepRef v]}} r
     go _ (x : _) = Left ("unknown or incomplete option: " <> x)
 
 newClaim :: Flags -> [Text] -> Either Text NewClaim
@@ -60,7 +59,7 @@ printFlags = [("--print-all", PrintAll), ("--print-true", PrintTrue), ("--print-
 main :: IO ()
 main = do
   setLocaleEncoding utf8
-  args <- map T.pack <$> getArgs
+  args <- map cs <$> getArgs
   dir <- resolveExploreDir
   case args of
     "check" : rest
@@ -77,11 +76,11 @@ main = do
       | cmd `elem` ["record", "record-append"]
       , (flagArgs, "--" : argv@(_ : _)) <- break (== "--") rest ->
           case parseFlags flagArgs >>= \f -> (f,) <$> newClaim f argv of
-            Left err -> hPutStrLn stderr (T.unpack err) >> exitWith (ExitFailure 2)
+            Left err -> TIO.hPutStrLn stderr err >> exitWith (ExitFailure 2)
             Right (f, nc)
               | cmd == "record" -> recordNew dir (parseClaimsName name) (fHeader f) nc >>= finish
               | otherwise -> recordAppend dir (parseClaimsName name) nc >>= finish
     ["record-fix", name, cid] -> recordFix dir (parseClaimsName name) cid >>= finish
     ["--help"] -> TIO.putStr usage
     [] -> TIO.putStr usage
-    _ -> hPutStrLn stderr (T.unpack usage) >> exitWith (ExitFailure 2)
+    _ -> TIO.hPutStrLn stderr usage >> exitWith (ExitFailure 2)

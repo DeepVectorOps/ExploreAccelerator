@@ -1,7 +1,4 @@
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | Replayable "claims" written by explore agents: a statement, a
 -- command and its expected output. A claim holds while replaying the command
@@ -12,6 +9,8 @@ module Claims
   , Claim (..)
   , ClaimsFile (..)
   , DepRef (..)
+  , Header (..)
+  , emptyHeader
   , Origin (..)
   , Reason (..)
   , Verdict (..)
@@ -19,6 +18,7 @@ module Claims
   , PrintMode (..)
   , resolveExploreDir
   , parseClaimsName
+  , parseDepRef
   , claimsPath
   , parseClaimsFile
   , checkClaims
@@ -72,13 +72,53 @@ instance FromJSON Claim where
   parseJSON = withObject "Claim" $ \o ->
     Claim <$> o .: "id" <*> o .: "text" <*> o .: "cmd" <*> o .:? "expect"
 
+claimPairs :: KeyValue e kv => Claim -> [kv]
+claimPairs Claim {..} =
+  ["id" .= claimId, "text" .= claimText, "cmd" .= claimCmd] <> ["expect" .= e | Just e <- [claimExpect]]
+
+instance ToJSON Claim where
+  toJSON = object . claimPairs
+  toEncoding = pairs . mconcat . claimPairs
+
 data DepRef = WholeFile ClaimsName | OneClaim ClaimsName ClaimId
   deriving stock (Eq, Show)
 
+instance FromJSON DepRef where
+  parseJSON = withText "DepRef" (pure . parseDepRef)
+
+instance ToJSON DepRef where
+  toJSON = \case
+    WholeFile (ClaimsName n) -> String n
+    OneClaim (ClaimsName n) (ClaimId i) -> String (n <> "#" <> i)
+
+-- | The optional first line of a claims file.
+data Header = Header
+  { hDoc :: Maybe Text
+  , hCommit :: Maybe Text
+  , hDepends :: [DepRef]
+  }
+  deriving stock (Eq, Show)
+
+emptyHeader :: Header
+emptyHeader = Header Nothing Nothing []
+
+headerKeys :: [Key]
+headerKeys = ["depends", "doc", "commit"]
+
+instance FromJSON Header where
+  parseJSON = withObject "Header" $ \o ->
+    Header <$> o .:? "doc" <*> o .:? "commit" <*> o .:? "depends" .!= []
+
+headerPairs :: KeyValue e kv => Header -> [kv]
+headerPairs Header {..} =
+  ["doc" .= d | Just d <- [hDoc]] <> ["commit" .= c | Just c <- [hCommit]] <> ["depends" .= hDepends | not (null hDepends)]
+
+instance ToJSON Header where
+  toJSON = object . headerPairs
+  toEncoding = pairs . mconcat . headerPairs
+
 data ClaimsFile = ClaimsFile
-  { cfDepends :: [DepRef]
-  , cfDoc :: Maybe Text
-  , cfCommit :: Maybe Text
+  { cfHeader :: Header
   , cfClaims :: [Claim]
   , cfProblems :: [Text]
   }
@@ -88,8 +128,8 @@ data Origin = Target | Dependency
   deriving stock (Eq, Show)
 
 data Reason
-  = Mismatch {expectedLines :: [Text], actualLines :: [Text]}
-  | Reordered {expectedOrder :: [Text], actualOrder :: [Text]}
+  = Mismatch [Text] [Text]
+  | Reordered [Text] [Text]
   | NotRecorded
   | Rejected Text
   | ExecFailed Text
@@ -131,7 +171,8 @@ parseDepRef t = case T.breakOn "#" t of
   (n, "") -> WholeFile (parseClaimsName n)
   (n, i) -> OneClaim (parseClaimsName n) (ClaimId (T.drop 1 i))
 
-data Line = LHeader [DepRef] (Maybe Text) (Maybe Text) [Text] | LClaim Claim
+-- | A header with its unknown keys, or a claim.
+data Line = LHeader Header [Text] | LClaim Claim
 
 -- | Non-blank lines; only the first may be a header object with any of
 -- @depends@, @doc@ and @commit@.
@@ -145,16 +186,11 @@ parseLines path = go True . zip [1 ..] . T.lines
           v <- first (err n) (eitherDecodeStrict (cs l))
           line <- first (err n) $ case v of
             Object o
-              | isFirst, any (`KM.member` o) ["depends", "doc", "commit"] ->
-                  flip parseEither o $ \h ->
-                    LHeader . maybe [] (map parseDepRef) <$> h .:? "depends" <*> h .:? "doc" <*> h .:? "commit"
-                      <*> pure [Key.toText k | k <- KM.keys h, Key.toText k `notElem` headerKeys]
+              | isFirst, any (`KM.member` o) headerKeys ->
+                  (`LHeader` [Key.toText k | k <- KM.keys o, k `notElem` headerKeys]) <$> parseEither parseJSON v
             _ -> LClaim <$> parseEither parseJSON v
           (line :) <$> go False rest
     err n e = path <> ":" <> show (n :: Int) <> ": " <> e
-
-headerKeys :: [Text]
-headerKeys = ["depends", "doc", "commit"]
 
 -- | Mistakes that would otherwise be silently ignored or confusing.
 problemsOf :: [Text] -> [Claim] -> [Text]
@@ -175,11 +211,9 @@ parseClaimsFile path txt = do
   ls <- parseLines path txt
   pure
     ClaimsFile
-      { cfDepends = concat [ds | LHeader ds _ _ _ <- ls]
-      , cfDoc = listToMaybe [d | LHeader _ (Just d) _ _ <- ls]
-      , cfCommit = listToMaybe [c | LHeader _ _ (Just c) _ <- ls]
+      { cfHeader = fromMaybe emptyHeader (listToMaybe [h | LHeader h _ <- ls])
       , cfClaims = [c | LClaim c <- ls]
-      , cfProblems = problemsOf (concat [u | LHeader _ _ _ u <- ls]) [c | LClaim c <- ls]
+      , cfProblems = problemsOf (concat [u | LHeader _ u <- ls]) [c | LClaim c <- ls]
       }
 
 splitCmd :: [Text] -> Either Text (String, [String])
@@ -213,11 +247,9 @@ verdictFor c = case claimExpect c of
 readClaimsFile :: FilePath -> ClaimsName -> IO (Either Reason ClaimsFile)
 readClaimsFile dir name@(ClaimsName n) = do
   direct <- doesFileExist (claimsPath dir name)
-  byDoc <- if direct then pure Nothing else findByDoc dir (n <> ".md")
-  case (direct, byDoc) of
-    (True, _) -> load (claimsPath dir name)
-    (_, Just path) -> load path
-    _ -> Left . MissingDep <$> notFound dir name
+  if direct
+    then load (claimsPath dir name)
+    else findByDoc dir (n <> ".md") >>= maybe (Left . MissingDep <$> notFound dir name) load
   where
     load path = first (BadFile . cs) . parseClaimsFile path . cs <$> BS.readFile path
 
@@ -232,7 +264,7 @@ listClaimsFiles dir = do
 findByDoc :: FilePath -> Text -> IO (Maybe FilePath)
 findByDoc dir doc = do
   paths <- listClaimsFiles dir
-  hits <- filterM (fmap (maybe False ((== Just doc) . cfDoc)) . header) paths
+  hits <- filterM (fmap (maybe False ((== Just doc) . hDoc . cfHeader)) . header) paths
   pure (listToMaybe hits)
   where
     header p = either (const Nothing) Just . parseClaimsFile p . cs <$> BS.readFile p
@@ -270,7 +302,7 @@ visit env origin only name =
         verdictFor c >>= emit (claimId c) (claimText c)
       once (envFiles env) name $ do
        forM_ (cfProblems cf) $ \p -> emit (ClaimId "lint") "" (VFalse (Lint p))
-       forM_ (cfDepends cf) $ \case
+       forM_ (hDepends (cfHeader cf)) $ \case
          WholeFile n -> visit env Dependency Nothing n
          OneClaim n i -> visit env Dependency (Just i) n
   where
@@ -299,7 +331,7 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
       (PrintTrue, VTrue) -> True
       (PrintFalse, VFalse _) -> True
       _ -> False
-    summary = (if allTrue rs then "OK: " else "FAILED: ") <> T.pack (show (count True) <> " true, " <> show (count False) <> " false")
+    summary = (if allTrue rs then "OK: " else "FAILED: ") <> cs (show (count True) <> " true, " <> show (count False) <> " false")
     count b = length [() | r <- rs, (resVerdict r == VTrue) == b]
     render r =
       let ClaimsName n = resFile r

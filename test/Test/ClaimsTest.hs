@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 module Test.ClaimsTest (spec) where
 
 import Claims
@@ -66,22 +64,22 @@ spec = describe "expacc replayable explore claims" $ do
     it "parses header and claims" $
       case parseClaimsFile "f" (T.unlines [headerLine ["other", "o2#id", "o3.md"], c1, c2]) of
         Right cf -> do
-          cfDepends cf `shouldBe`
+          hDepends (cfHeader cf) `shouldBe`
             [WholeFile (ClaimsName "other"), OneClaim (ClaimsName "o2") (ClaimId "id"), WholeFile (ClaimsName "o3")]
           map claimId (cfClaims cf) `shouldBe` [ClaimId "c1", ClaimId "c2"]
           map claimExpect (cfClaims cf) `shouldBe` [Just ["x"], Nothing]
         Left e -> expectationFailure e
     it "parses doc and commit from the header, with or without depends" $ do
       let h = cs . encode . object
-      fmap (\cf -> (cfDoc cf, cfCommit cf, cfDepends cf))
+      fmap cfHeader
         (parseClaimsFile "f" (T.unlines [h ["doc" .= ("e.md" :: Text), "commit" .= ("abc" :: Text)], c1]))
-        `shouldBe` Right (Just "e.md", Just "abc", [])
-      fmap (\cf -> (cfDoc cf, cfCommit cf, length (cfDepends cf), length (cfClaims cf)))
+        `shouldBe` Right (Header (Just "e.md") (Just "abc") [])
+      fmap (\cf -> (cfHeader cf, length (cfClaims cf)))
         (parseClaimsFile "f" (T.unlines [h ["depends" .= ["x" :: Text], "commit" .= ("abc" :: Text)], c1]))
-        `shouldBe` Right (Nothing, Just "abc", 1, 1)
+        `shouldBe` Right (Header Nothing (Just "abc") [WholeFile (ClaimsName "x")], 1)
     it "parses without header" $
-      fmap (\cf -> (cfDepends cf, length (cfClaims cf))) (parseClaimsFile "f" (T.unlines [c1]))
-        `shouldBe` Right ([], 1)
+      fmap (\cf -> (cfHeader cf, length (cfClaims cf))) (parseClaimsFile "f" (T.unlines [c1]))
+        `shouldBe` Right (emptyHeader, 1)
     it "rejects a depends object after the first line" $
       case parseClaimsFile "f" (T.unlines [c1, headerLine ["x"]]) of
         Left e -> e `shouldSatisfy` ("f:2:" `isInfixOf`)
@@ -239,29 +237,28 @@ spec = describe "expacc replayable explore claims" $ do
 
   describe "record" $ do
     let nc i f = NewClaim i ("claim " <> i) ["rg", "-n", "needle", cs f]
-        noHeader = Header Nothing Nothing []
         withData act = withTmp $ \d -> do
           let f = d </> "data.txt"
           TIO.writeFile f "needle one\nhay\nneedle two\n"
           act d f
     it "record stores the command output as expect and the claim then checks TRUE" $ withData $ \d f -> do
-      Right msg <- recordNew d (ClaimsName "r") noHeader (nc "a" f)
+      Right msg <- recordNew d (ClaimsName "r") emptyHeader (nc "a" f)
       msg `shouldSatisfy` T.isInfixOf "(2 lines)"
       msg `shouldSatisfy` T.isInfixOf "1:needle one"
       rs <- checkClaims d [ClaimsName "r"]
       verdicts rs `shouldBe` [("a", VTrue)]
     it "record writes the header, and refuses to overwrite an existing file" $ withData $ \d f -> do
-      Right _ <- recordNew d (ClaimsName "r") (Header (Just "r.md") (Just "abc") ["dep"]) (nc "a" f)
+      Right _ <- recordNew d (ClaimsName "r") (Header (Just "r.md") (Just "abc") [WholeFile (ClaimsName "dep")]) (nc "a" f)
       Right cf <- parseClaimsFile "r" <$> TIO.readFile (d </> "claims" </> "r.claims.jsonl")
-      (cfDoc cf, cfCommit cf, cfDepends cf) `shouldBe` (Just "r.md", Just "abc", [WholeFile (ClaimsName "dep")])
-      Left e <- recordNew d (ClaimsName "r") noHeader (nc "b" f)
+      cfHeader cf `shouldBe` Header (Just "r.md") (Just "abc") [WholeFile (ClaimsName "dep")]
+      Left e <- recordNew d (ClaimsName "r") emptyHeader (nc "b" f)
       e `shouldSatisfy` T.isInfixOf "record-append"
     it "record does not write anything when the command fails" $ withData $ \d f -> do
-      Left e <- recordNew d (ClaimsName "r") noHeader (nc "a" (f <> ".nope"))
+      Left e <- recordNew d (ClaimsName "r") emptyHeader (nc "a" (f <> ".nope"))
       e `shouldSatisfy` T.isInfixOf "nothing recorded"
       recordAppend d (ClaimsName "r") (nc "a" f) >>= (`shouldSatisfy` either (const True) (const False))
     it "record-append adds a claim and rejects a duplicate id" $ withData $ \d f -> do
-      Right _ <- recordNew d (ClaimsName "r") noHeader (nc "a" f)
+      Right _ <- recordNew d (ClaimsName "r") emptyHeader (nc "a" f)
       Right _ <- recordAppend d (ClaimsName "r") (nc "b" f)
       Left e <- recordAppend d (ClaimsName "r") (nc "b" f)
       e `shouldSatisfy` T.isInfixOf "record-fix"
@@ -278,7 +275,7 @@ spec = describe "expacc replayable explore claims" $ do
       verdicts rs `shouldBe` [("a", VFalse (Mismatch ["1:needle one", "3:needle two"] ["1:needle one", "3:needle changed"])), ("b", VTrue)]
       recordFix d (ClaimsName "r") "b" >>= (`shouldSatisfy` either (const False) (T.isPrefixOf "unchanged"))
     it "record-fix on an unknown id fails" $ withData $ \d f -> do
-      Right _ <- recordNew d (ClaimsName "r") noHeader (nc "a" f)
+      Right _ <- recordNew d (ClaimsName "r") emptyHeader (nc "a" f)
       recordFix d (ClaimsName "r") "zzz" >>= (`shouldSatisfy` either (T.isInfixOf "no claim zzz") (const False))
 
   describe "renderResults" $ do
@@ -302,7 +299,7 @@ spec = describe "expacc replayable explore claims" $ do
       out PrintAll `shouldSatisfy` T.isInfixOf "FAILED: 1 true, 1 false"
       renderResults PrintAll [t] `shouldSatisfy` T.isInfixOf "OK: 1 true, 0 false"
     it "diff keeps two lines of context and drops the rest" $ do
-      let ls = ["l" <> T.pack (show i) | i <- [1 .. 10 :: Int]]
+      let ls = ["l" <> cs (show i) | i <- [1 .. 10 :: Int]]
           r = ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target
                 (VFalse (Mismatch ls (take 9 ls <> ["new"])))
           txt = renderResults PrintFalse [r]

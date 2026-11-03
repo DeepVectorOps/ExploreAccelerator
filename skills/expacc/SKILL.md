@@ -22,8 +22,13 @@ A claims file is `claims/<name>.claims.jsonl` under the explore dir
   `--sort path`, or search one file per claim. A negative claim
   ("X is not used in src") is `"expect": []`.
 
-Don't write this file by hand. `expacc record` runs the command and stores its
-output as `expect` (see below).
+Prefer the CLI. `expacc record` runs the command and stores its output as
+`expect`, so don't copy evidence by hand and don't write a new claims file
+yourself. If something outside that flow happens — the statement is wrong but
+the command and its evidence are already right, or you need to drop or reword
+a claim in your own file — edit the claims file directly. There is no flag
+that rewrites `text`. Do not record a second claim just to correct wording,
+and do not spend a turn on `--help` looking for one.
 
 ### Header line (optional)
 
@@ -52,7 +57,9 @@ expacc record-fix NAME ID
   `--commit` or `--depends` is given). It fails if the file exists.
 - `record-append` adds one claim to your file. It fails on a duplicate id.
 - `record-fix` re-runs that claim's command and rewrites its `expect`, and shows
-  the diff. Use it when the code changed and the claim should follow it.
+  the diff. Use it when the code changed and the claim should follow it. It
+  does not change `text` or `cmd`. To correct a statement, edit that field in
+  your own claims file.
 - Everything after `--` is the argv, run without a shell. The output it printed is
   stored as `expect` and echoed back, so that is your evidence. Don't run the
   command separately first.
@@ -115,6 +122,8 @@ no matches) is a normal result.
 ## Rules
 
 - Write only your own claims file. Never edit another claims file. To build on
-  one, list it in `depends` of your own file.
+  one, list it in `depends` of your own file. Editing your own file is for
+  the cases the CLI does not cover (a wrong statement, a claim to drop). New
+  evidence still goes through `record` / `record-append` / `record-fix`.
 - Never put a shell in `cmd`: no pipes, redirects or globs, and `cmd` is an
   array, not a string.

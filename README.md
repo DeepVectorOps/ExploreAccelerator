@@ -39,3 +39,55 @@ FALSE auth-flow#token-ttl  Tokens expire after 1h  -- output differs
     + src/auth.js:const TTL = 7200;
 1 true, 1 false
 ```
+
+## Claude Code setup: the AcceleratedExplore agent
+
+[agents/AcceleratedExplore.md](agents/AcceleratedExplore.md) is a Claude Code
+subagent that works like the built-in Explore agent, but records its answer.
+It checks prior notes in `live-docs/explore/` with `expacc`, investigates only
+the gaps, writes `live-docs/explore/<slug>.md` plus a claims file, and replies
+with just the path to the note. It runs on Haiku and has the `expacc` skill
+preloaded.
+
+### 1. Install expacc
+
+```sh
+nix-env -if .      # installs expacc into ~/.nix-profile/bin
+```
+
+### 2. Configure Claude
+
+Install the skill (user-wide, or use `<repo>/.claude/skills/` for one project):
+
+```sh
+mkdir -p ~/.claude/skills/expacc
+cp skills/expacc/SKILL.md ~/.claude/skills/expacc/SKILL.md
+```
+
+Then add a line to the installed `SKILL.md`, under the `# expacc` heading, giving the absolute path to the binary (`readlink -f $(which expacc)` or `~/.nix-profile/bin/expacc` expanded), so the agent can call it:
+
+```
+The path to executable is /home/<you>/.nix-profile/bin/expacc
+```
+
+Install the agent:
+
+```sh
+mkdir -p ~/.claude/agents          # or <repo>/.claude/agents for one project
+cp agents/AcceleratedExplore.md ~/.claude/agents/
+```
+
+Restart Claude Code so it picks up the agent and skill.
+
+### 3. Use it
+
+Ask Claude to explore with the AcceleratedExplore agent. The prompt must start
+with a slug line, then the question and the breadth (`medium` or `very thorough`):
+
+```
+SLUG: logging-systems-overview-and-config
+Where is logging configured? Breadth: medium
+```
+
+The agent works from the repo root and creates `live-docs/explore/` files
+there, so run it in the repo you want explored.

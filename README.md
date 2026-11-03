@@ -24,7 +24,7 @@ expacc record-fix NAME ID
 ```
 
 `record` runs the command and stores its output as the expected output.
-`check` also reports lint problems. `NAME` (`foo`, `foo.claims.jsonl` or `foo.md`) resolves to `claims/foo.claims.jsonl`
+`check` also reports lint problems. `NAME` is a slug (`other`, or `other#id` for one claim) and resolves to `claims/other.claims.jsonl`
 in `$EXPACC_DIR` (default `./live-docs/explore`). Commands run from
 the current directory, so run it from the repo the claims describe.
 

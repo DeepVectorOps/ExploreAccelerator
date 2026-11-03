@@ -4,6 +4,7 @@ import Claims
 import Record
 import Control.Exception (IOException, bracket, catch, finally)
 import Data.Aeson (encode, object, (.=))
+import Data.Either (isLeft)
 import Data.List (isInfixOf)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
@@ -53,16 +54,22 @@ ids rs = [(n, i) | ClaimResult (ClaimsName n) (ClaimId i) _ _ _ <- rs]
 spec :: Spec
 spec = describe "expacc replayable explore claims" $ do
   describe "parseClaimsName" $ do
-    it "strips .claims.jsonl and .md" $ do
-      parseClaimsName "foo.claims.jsonl" `shouldBe` ClaimsName "foo"
-      parseClaimsName "foo.md" `shouldBe` ClaimsName "foo"
-      parseClaimsName "foo" `shouldBe` ClaimsName "foo"
+    it "accepts a slug and rejects a path or a suffix" $ do
+      parseClaimsName "foo" `shouldBe` Right (ClaimsName "foo")
+      parseClaimsName "foo-bar_1" `shouldBe` Right (ClaimsName "foo-bar_1")
+      parseDepRef "other" `shouldBe` Right (WholeFile (ClaimsName "other"))
+      parseDepRef "other#id" `shouldBe` Right (OneClaim (ClaimsName "other") (ClaimId "id"))
+      parseClaimsName "foo.claims.jsonl" `shouldSatisfy` isLeft
+      parseClaimsName "foo.md" `shouldSatisfy` isLeft
+      parseClaimsName "live-docs/explore/claims/foo" `shouldSatisfy` isLeft
+      parseDepRef "live-docs/explore/claims/foo.claims.jsonl" `shouldSatisfy` isLeft
+      parseDepRef "other#" `shouldSatisfy` isLeft
 
   describe "parseClaimsFile" $ do
     let c1 = claimLine "c1" "one" ["ls"] (Just ["x"])
         c2 = claimLine "c2" "two" ["ls"] Nothing
     it "parses header and claims" $
-      case parseClaimsFile "f" (T.unlines [headerLine ["other", "o2#id", "o3.md"], c1, c2]) of
+      case parseClaimsFile "f" (T.unlines [headerLine ["other", "o2#id", "o3"], c1, c2]) of
         Right cf -> do
           hDepends (cfHeader cf) `shouldBe`
             [WholeFile (ClaimsName "other"), OneClaim (ClaimsName "o2") (ClaimId "id"), WholeFile (ClaimsName "o3")]
@@ -184,15 +191,16 @@ spec = describe "expacc replayable explore claims" $ do
           act d f
         good i f = rgClaim i f (Just ["1:needle"])
         header = cs . encode . object
-    it "resolves a .md name through the doc header" $ withData $ \d f -> do
-      writeClaims d "123" [header ["doc" .= ("my-note.md" :: Text)], good "a1" f]
-      rs <- checkClaims d [parseClaimsName "my-note.md"]
+    it "a path in depends is a bad file, not a missing file" $ withTmp $ \d -> do
+      writeClaims d "a" [headerLine ["live-docs/explore/claims/b.claims.jsonl"]]
+      rs <- checkClaims d [ClaimsName "a"]
+      case verdicts rs of
+        [(_, VFalse (BadFile m))] -> m `shouldSatisfy` T.isInfixOf "claims name must be a slug"
+        other -> expectationFailure (show other)
+    it "resolves a slug only, not a doc header" $ withData $ \d f -> do
+      writeClaims d "my-note" [header ["doc" .= ("my-note.md" :: Text)], good "a1" f]
+      rs <- checkClaims d [ClaimsName "my-note"]
       verdicts rs `shouldBe` [("a1", VTrue)]
-    it "prefers a claims file named like the doc" $ withData $ \d f -> do
-      writeClaims d "x" [good "direct" f]
-      writeClaims d "y" [header ["doc" .= ("x.md" :: Text)], good "other" f]
-      rs <- checkClaims d [parseClaimsName "x.md"]
-      verdicts rs `shouldBe` [("direct", VTrue)]
     it "does not read claims files outside claims/" $ withData $ \d f -> do
       TIO.writeFile (d </> "flat.claims.jsonl") (T.unlines [good "a" f])
       rs <- checkClaims d [ClaimsName "flat"]
@@ -310,6 +318,10 @@ spec = describe "expacc replayable explore claims" $ do
       out PrintAll `shouldSatisfy` T.isInfixOf "    + new"
     it "TRUE rows of Target have no (dep) marker" $
       out PrintTrue `shouldSatisfy` (not . T.isInfixOf "(dep)")
+    it "prefixes missing dependency only when the miss is a dep" $ do
+      let miss o = ClaimResult (ClaimsName "f") (ClaimId "*") "" o (VFalse (MissingDep "no such claims file x"))
+      renderResults PrintFalse [miss Target] `shouldSatisfy` (not . T.isInfixOf "missing dependency:")
+      renderResults PrintFalse [miss Dependency] `shouldSatisfy` T.isInfixOf "missing dependency: no such claims file"
 
   describe "resolveExploreDir" $
     it "honours EXPACC_DIR and falls back to default" $ do

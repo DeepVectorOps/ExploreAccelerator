@@ -37,8 +37,8 @@ Must be the first line:
   `claims/other.claims.jsonl`. Not a path, and not a `.md` note name.
   Followed recursively, each claim checked once, cycles are safe.
   Shown with a `(dep)` suffix.
-- `doc`, `commit`: metadata only, not checked. `expacc check foo.md`
-  finds the claims file whose `doc` is `foo.md`.
+- `doc`, `commit`: metadata only, not checked. They are not a way to
+  name a claims file. `expacc check` takes the slug only.
 
 ## Recording claims
 
@@ -83,9 +83,11 @@ expacc check 1234
 expacc check NAME... [--print-all | --print-true | --print-false]
 ```
 
-- `NAME` (`foo`, `foo.claims.jsonl` or `foo.md`) resolves to
-  `claims/foo.claims.jsonl` in `$EXPACC_DIR` (default
-  `./live-docs/explore`).
+- `NAME` is a slug (`other`, or `other#id` for one claim). It resolves to
+  `claims/other.claims.jsonl` in `$EXPACC_DIR` (default
+  `./live-docs/explore`). A path, `.claims.jsonl` or `.md` is rejected
+  (exit 2). Do not pass what `rg -l` printed; pass the filename without
+  its directory and without `.claims.jsonl`.
 - Run it from the root of the repo the claims describe.
 - `--print-false` (default) shows failing claims with a diff; `--print-true`
   and `--print-all` show passing / all claims.

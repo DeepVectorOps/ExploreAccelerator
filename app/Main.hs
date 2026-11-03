@@ -20,7 +20,7 @@ usage =
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD ARG..."
     , "       expacc record-append NAME --id ID --text TEXT -- CMD ARG..."
     , "       expacc record-fix NAME ID"
-    , "NAME is foo, foo.claims.jsonl or foo.md, resolved in $EXPACC_DIR/claims"
+    , "NAME is a slug (other, or other#id for one claim), resolved in $EXPACC_DIR/claims"
     , "(default ./live-docs/explore/claims). record runs CMD and stores its output as the"
     , "expected output; record creates the file, record-append adds a claim to it,"
     , "record-fix re-runs a claim and rewrites its expected output."
@@ -40,7 +40,9 @@ parseFlags = go (Flags Nothing Nothing emptyHeader)
     go f ("--text" : v : r) = go f {fText = Just v} r
     go f ("--doc" : v : r) = go f {fHeader = (fHeader f) {hDoc = Just v}} r
     go f ("--commit" : v : r) = go f {fHeader = (fHeader f) {hCommit = Just v}} r
-    go f ("--depends" : v : r) = go f {fHeader = (fHeader f) {hDepends = hDepends (fHeader f) <> [parseDepRef v]}} r
+    go f ("--depends" : v : r) = case parseDepRef v of
+      Left e -> Left e
+      Right d -> go f {fHeader = (fHeader f) {hDepends = hDepends (fHeader f) <> [d]}} r
     go _ (x : _) = Left ("unknown or incomplete option: " <> x)
 
 newClaim :: Flags -> [Text] -> Either Text NewClaim
@@ -56,6 +58,12 @@ finish = \case
 printFlags :: [(Text, PrintMode)]
 printFlags = [("--print-all", PrintAll), ("--print-true", PrintTrue), ("--print-false", PrintFalse)]
 
+-- | A bad name is a usage error (exit 2), not a failed check.
+requireNames :: [Text] -> IO [ClaimsName]
+requireNames ns = case traverse parseClaimsName ns of
+  Left e -> TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2)
+  Right xs -> pure xs
+
 main :: IO ()
 main = do
   setLocaleEncoding utf8
@@ -65,11 +73,13 @@ main = do
     "check" : rest
       | (flags, names@(_ : _)) <- partition ("--" `T.isPrefixOf`) rest
       , Just modes <- mapM (`lookup` printFlags) flags -> do
-          results <- checkClaims dir (parseClaimsName <$> names)
+          parsed <- requireNames names
+          results <- checkClaims dir parsed
           TIO.putStr (renderResults (last (PrintFalse : modes)) results)
           exitWith (if allTrue results then ExitSuccess else ExitFailure 1)
     "lint" : names@(_ : _) -> do
-      problems <- concat <$> mapM (\n -> map (\p -> n <> ": " <> p) <$> lintFile dir (parseClaimsName n)) names
+      parsed <- requireNames names
+      problems <- concat <$> mapM (\n -> map (\p -> let ClaimsName t = n in t <> ": " <> p) <$> lintFile dir n) parsed
       TIO.putStr (T.unlines (if null problems then ["OK: no problems"] else problems))
       exitWith (if null problems then ExitSuccess else ExitFailure 1)
     cmd : name : rest
@@ -77,10 +87,14 @@ main = do
       , (flagArgs, "--" : argv@(_ : _)) <- break (== "--") rest ->
           case parseFlags flagArgs >>= \f -> (f,) <$> newClaim f argv of
             Left err -> TIO.hPutStrLn stderr err >> exitWith (ExitFailure 2)
-            Right (f, nc)
-              | cmd == "record" -> recordNew dir (parseClaimsName name) (fHeader f) nc >>= finish
-              | otherwise -> recordAppend dir (parseClaimsName name) nc >>= finish
-    ["record-fix", name, cid] -> recordFix dir (parseClaimsName name) cid >>= finish
+            Right (f, nc) -> case parseClaimsName name of
+              Left e -> TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2)
+              Right n
+                | cmd == "record" -> recordNew dir n (fHeader f) nc >>= finish
+                | otherwise -> recordAppend dir n nc >>= finish
+    ["record-fix", name, cid] -> case parseClaimsName name of
+      Left e -> TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2)
+      Right n -> recordFix dir n cid >>= finish
     ["--help"] -> TIO.putStr usage
     [] -> TIO.putStr usage
     _ -> TIO.hPutStrLn stderr usage >> exitWith (ExitFailure 2)

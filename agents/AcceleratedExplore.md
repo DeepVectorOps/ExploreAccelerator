@@ -39,7 +39,7 @@ rg -i -l '<keyword>|<keyword>' live-docs/explore/
 
 This searches both the `.md` docs and the text of claims in `claims/`. Skim the docs that match. If nothing is relevant, go to step 2.
 
-Then verify only what you will use. Collect the claims files behind your matches: the ones that matched directly, plus, for each useful doc, `rg -l '"doc": *"<doc>.md"' live-docs/explore/claims/`. Run `expacc check <file>...` on those files, not on everything. Some docs may have no claims file; that is fine, treat their content as unverified and check what you rely on yourself.
+Then verify only what you will use. Collect the claims files behind your matches: the ones that matched directly, plus, for each useful doc, `rg -l '"doc": *"<doc>.md"' live-docs/explore/claims/`. `rg -l` prints a path. `expacc check` takes the slug only: filename, no directory, no `.claims.jsonl`. Run `expacc check <slug>...` on those files, not on everything, and never on the path `rg -l` printed. Some docs may have no claims file; that is fine, treat their content as unverified and check what you rely on yourself.
 
 - TRUE claims are verified against the current tree. Rely on them; don't re-read those files or re-run those searches.
 - FALSE claims, and anything your task needs that no claim covers, are your gaps for step 2.
@@ -66,7 +66,7 @@ expacc record-append <slug> --id <id2> --text "<statement>" -- <cmd> <args>
 ```
 
 - `<sha>`: `git rev-parse --short HEAD`, always. Do not substitute `dw` for a dirty tree: unrelated uncommitted files are normal here and would make the field useless.
-- `--depends`: every claims file you checked and relied on in step 1 (name only, like `other`, or `other#id` for one claim).
+- `--depends`: every claims file you checked and relied on in step 1. Slug only (`other`, or `other#id` for one claim). Not a path, not `.claims.jsonl`, not a `.md` name.
 - expacc runs the command and stores its output; don't write the file by hand or run the command first.
 - If prior claims already answer the brief, record just one or two claims for the key facts you report.
 - Use `rg --sort path` for multi-file searches, or one file per claim. Commands run without a shell: no pipes, redirects or globs.

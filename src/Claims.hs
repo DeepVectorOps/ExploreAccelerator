@@ -41,6 +41,7 @@ import qualified Data.ByteString as BS
 import Data.IORef
 import Data.Algorithm.Diff (PolyDiff (..))
 import Data.Algorithm.DiffContext (Numbered (..), getContextDiff)
+import Data.Char (isAlphaNum)
 import Data.List (intercalate, isSuffixOf, sort)
 import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Map.Strict as Map
@@ -84,7 +85,9 @@ data DepRef = WholeFile ClaimsName | OneClaim ClaimsName ClaimId
   deriving stock (Eq, Show)
 
 instance FromJSON DepRef where
-  parseJSON = withText "DepRef" (pure . parseDepRef)
+  parseJSON = withText "DepRef" $ \t -> case parseDepRef t of
+    Left e -> fail (cs e)
+    Right d -> pure d
 
 instance ToJSON DepRef where
   toJSON = \case
@@ -156,9 +159,13 @@ data PrintMode = PrintAll | PrintTrue | PrintFalse
 resolveExploreDir :: IO FilePath
 resolveExploreDir = fromMaybe "./live-docs/explore" <$> lookupEnv "EXPACC_DIR"
 
--- | Accepts @foo@, @foo.claims.jsonl@ or @foo.md@.
-parseClaimsName :: Text -> ClaimsName
-parseClaimsName t = ClaimsName $ fromMaybe t (listToMaybe [b | s <- [".claims.jsonl", ".md"], Just b <- [T.stripSuffix s t]])
+-- | The only legal claims name: a slug (@other@), not a path and not a
+-- suffix. @.claims.jsonl@ and @.md@ are rejected so a doubled path cannot
+-- be assembled by accident.
+parseClaimsName :: Text -> Either Text ClaimsName
+parseClaimsName t
+  | isSlug t = Right (ClaimsName t)
+  | otherwise = Left (badClaimsName t)
 
 claimsPath :: FilePath -> ClaimsName -> FilePath
 claimsPath dir (ClaimsName n) = claimsDir dir </> cs n <> ".claims.jsonl"
@@ -166,10 +173,27 @@ claimsPath dir (ClaimsName n) = claimsDir dir </> cs n <> ".claims.jsonl"
 claimsDir :: FilePath -> FilePath
 claimsDir dir = dir </> "claims"
 
-parseDepRef :: Text -> DepRef
+-- | @other@ or @other#id@. Same slug rule on both sides of @#@.
+parseDepRef :: Text -> Either Text DepRef
 parseDepRef t = case T.breakOn "#" t of
-  (n, "") -> WholeFile (parseClaimsName n)
-  (n, i) -> OneClaim (parseClaimsName n) (ClaimId (T.drop 1 i))
+  (n, "") -> WholeFile <$> parseClaimsName n
+  (n, rest)
+    | Just i <- T.stripPrefix "#" rest, isSlug i ->
+        OneClaim <$> parseClaimsName n <*> pure (ClaimId i)
+    | otherwise -> Left (badClaimsName t)
+
+isSlug :: Text -> Bool
+isSlug t = case T.uncons t of
+  Just (c, rest) -> isAlphaNum c && T.all slugChar rest
+  Nothing -> False
+  where
+    slugChar c = isAlphaNum c || c == '-' || c == '_'
+
+badClaimsName :: Text -> Text
+badClaimsName t =
+  "claims name must be a slug like other or other#id, not "
+    <> t
+    <> " (no path, no .claims.jsonl, no .md)"
 
 -- | A header with its unknown keys, or a claim.
 data Line = LHeader Header [Text] | LClaim Claim
@@ -242,16 +266,14 @@ verdictFor c = case claimExpect c of
       | sort e == sort a = VFalse (Reordered e a)
       | otherwise = VFalse (Mismatch e a)
 
--- | Reads @claims/NAME.claims.jsonl@. When there is none, falls back to the
--- file whose @doc@ header is @NAME.md@.
+-- | Reads @$EXPACC_DIR/claims/NAME.claims.jsonl@. NAME is a slug; there is
+-- no doc-header lookup and no path acceptance.
 readClaimsFile :: FilePath -> ClaimsName -> IO (Either Reason ClaimsFile)
-readClaimsFile dir name@(ClaimsName n) = do
-  direct <- doesFileExist (claimsPath dir name)
-  if direct
-    then load (claimsPath dir name)
-    else findByDoc dir (n <> ".md") >>= maybe (Left . MissingDep <$> notFound dir name) load
-  where
-    load path = first (BadFile . cs) . parseClaimsFile path . cs <$> BS.readFile path
+readClaimsFile dir name = do
+  let path = claimsPath dir name
+  doesFileExist path >>= \case
+    True -> first (BadFile . cs) . parseClaimsFile path . cs <$> BS.readFile path
+    False -> Left . MissingDep <$> notFound dir name
 
 -- | Claims files in @claims/@, sorted.
 listClaimsFiles :: FilePath -> IO [FilePath]
@@ -261,21 +283,13 @@ listClaimsFiles dir = do
     False -> pure []
     True -> map (cdir </>) . sort . filter (".claims.jsonl" `isSuffixOf`) <$> listDirectory cdir
 
-findByDoc :: FilePath -> Text -> IO (Maybe FilePath)
-findByDoc dir doc = do
-  paths <- listClaimsFiles dir
-  hits <- filterM (fmap (maybe False ((== Just doc) . hDoc . cfHeader)) . header) paths
-  pure (listToMaybe hits)
-  where
-    header p = either (const Nothing) Just . parseClaimsFile p . cs <$> BS.readFile p
-
 notFound :: FilePath -> ClaimsName -> IO Text
 notFound dir name = do
   have <- map (T.dropEnd (T.length ".claims.jsonl") . cs . takeFileName) <$> listClaimsFiles dir
   let avail
         | null have = "none"
         | otherwise = T.intercalate ", " (take 10 have) <> (if length have > 10 then ", ..." else "")
-  pure ("no such file " <> cs (claimsPath dir name) <> " (claims files in " <> cs (claimsDir dir) <> ": " <> avail <> ")")
+  pure ("no such claims file " <> cs (claimsPath dir name) <> " (claims files in " <> cs (claimsDir dir) <> ": " <> avail <> ")")
 
 data Env = Env
   { envDir :: FilePath
@@ -340,15 +354,16 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
        in case resVerdict r of
             VTrue -> ["TRUE  " <> label <> "  " <> resText r]
             VFalse why ->
-              ("FALSE " <> label <> "  " <> resText r <> "  -- " <> reasonText why)
+              ("FALSE " <> label <> "  " <> resText r <> "  -- " <> reasonText (resOrigin r) why)
                 : diffLines why
-    reasonText = \case
+    reasonText origin = \case
       Mismatch {} -> "output differs"
       Reordered {} -> "same lines, different order (sort the output, e.g. rg --sort path)"
       NotRecorded -> "no expect recorded"
       Rejected t -> "rejected: " <> t
       ExecFailed t -> "exec failed: " <> t
-      MissingDep t -> "missing dependency: " <> t
+      MissingDep t ->
+        (if origin == Dependency then "missing dependency: " else "") <> t
       BadFile t -> t
       Lint t -> "lint: " <> t
     diffLines = \case

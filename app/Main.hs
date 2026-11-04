@@ -65,10 +65,11 @@ printFlags :: [(Text, PrintMode)]
 printFlags = [("--print-all", PrintAll), ("--print-true", PrintTrue), ("--print-false", PrintFalse)]
 
 -- | A bad name is a usage error (exit 2), not a failed check.
-requireNames :: [Text] -> IO [ClaimsName]
-requireNames ns = case traverse parseClaimsName ns of
-  Left e -> TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2)
-  Right xs -> pure xs
+usageError :: Text -> IO a
+usageError e = TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2)
+
+requireName :: Text -> IO ClaimsName
+requireName = either usageError pure . parseClaimsName
 
 main :: IO ()
 main = do
@@ -79,12 +80,12 @@ main = do
     "check" : rest
       | (flags, names@(_ : _)) <- partition ("--" `T.isPrefixOf`) rest
       , Just modes <- mapM (`lookup` printFlags) flags -> do
-          parsed <- requireNames names
+          parsed <- traverse requireName names
           results <- checkClaims dir parsed
           TIO.putStr (renderResults (last (PrintFalse : modes)) results)
           exitWith (if allTrue results then ExitSuccess else ExitFailure 1)
     "lint" : names@(_ : _) -> do
-      parsed <- requireNames names
+      parsed <- traverse requireName names
       problems <- concat <$> mapM (\n -> map (\p -> let ClaimsName t = n in t <> ": " <> p) <$> lintFile dir n) parsed
       TIO.putStr (T.unlines (if null problems then ["OK: no problems"] else problems))
       exitWith (if null problems then ExitSuccess else ExitFailure 1)
@@ -93,14 +94,10 @@ main = do
       , (flagArgs, "--" : argv@(_ : _)) <- break (== "--") rest ->
           case parseFlags flagArgs >>= \f -> (f,) <$> newClaim f argv of
             Left err -> TIO.hPutStrLn stderr err >> exitWith (ExitFailure 2)
-            Right (f, nc) -> case parseClaimsName name of
-              Left e -> TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2)
-              Right n
-                | cmd == "record" -> recordNew dir n (fHeader f) nc >>= finish
-                | otherwise -> recordAppend dir n nc >>= finish
-    ["record-fix", name, cid] -> case parseClaimsName name of
-      Left e -> TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2)
-      Right n -> recordFix dir n cid >>= finish
+            Right (f, nc) -> do
+              n <- requireName name
+              (if cmd == "record" then recordNew dir n (fHeader f) nc else recordAppend dir n nc) >>= finish
+    ["record-fix", name, cid] -> requireName name >>= \n -> recordFix dir n cid >>= finish
     ["--help"] -> TIO.putStr usage
     [] -> TIO.putStr usage
     _ -> TIO.hPutStrLn stderr usage >> exitWith (ExitFailure 2)

@@ -12,6 +12,12 @@ build-type:     Simple
 library
   exposed-modules:
       Claims
+      Claims.Check
+      Claims.File
+      Claims.Name
+      Claims.Quote
+      Claims.Result
+      Claims.Run
       Record
   other-modules:
       Paths_explore_accelerator

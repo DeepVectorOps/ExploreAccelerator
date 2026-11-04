@@ -26,6 +26,7 @@ module Claims
   , allTrue
   , lintFile
   , runCmd
+  , quoteArgv
   , claimsDir
   , renderDiff
   ) where
@@ -64,14 +65,19 @@ newtype ClaimsName = ClaimsName Text
 data Claim = Claim
   { claimId :: ClaimId
   , claimText :: Text
-  , claimCmd :: [Text]
+  , claimCmd :: Text
   , claimExpect :: Maybe [Text]
   }
   deriving stock (Eq, Show)
 
 instance FromJSON Claim where
   parseJSON = withObject "Claim" $ \o ->
-    Claim <$> o .: "id" <*> o .: "text" <*> o .: "cmd" <*> o .:? "expect"
+    Claim <$> o .: "id" <*> o .: "text" <*> (o .: "cmd" >>= cmdText) <*> o .:? "expect"
+    where
+      -- Older files hold an argv array; it becomes one quoted bash string.
+      cmdText = \case
+        String t -> pure t
+        v -> quoteArgv <$> parseJSON v
 
 claimPairs :: KeyValue e kv => Claim -> [kv]
 claimPairs Claim {..} =
@@ -221,14 +227,8 @@ problemsOf :: [Text] -> [Claim] -> [Text]
 problemsOf unknownKeys claims =
   ["unknown header key: " <> k | k <- unknownKeys]
     <> ["duplicate claim id: " <> i | (ClaimId i, n) <- counts, n > (1 :: Int)]
-    <> [ "claim " <> i <> ": cmd is run without a shell, but contains " <> t
-       | Claim {claimId = ClaimId i, claimCmd = cmd} <- claims
-       , t <- take 1 [t | t <- cmd, t `elem` shellTokens] <> take 1 [h | h : _ <- [cmd], h `elem` shells]
-       ]
   where
     counts = Map.toList (Map.fromListWith (+) [(claimId c, 1) | c <- claims])
-    shellTokens = ["|", "||", "&&", ";", ">", ">>", "<", "2>&1", "2>/dev/null"]
-    shells = ["sh", "bash", "zsh"]
 
 parseClaimsFile :: FilePath -> Text -> Either String ClaimsFile
 parseClaimsFile path txt = do
@@ -240,20 +240,24 @@ parseClaimsFile path txt = do
       , cfProblems = problemsOf (concat [u | LHeader _ u <- ls]) [c | LClaim c <- ls]
       }
 
-splitCmd :: [Text] -> Either Text (String, [String])
-splitCmd = \case
-  [] -> Left "empty command"
-  c : args -> Right (cs c, cs <$> args)
+-- | One bash word per argument, so an argv runs as it would unshelled.
+quoteArgv :: [Text] -> Text
+quoteArgv = T.unwords . map quote
+  where
+    quote w
+      | not (T.null w) && T.all plain w = w
+      | otherwise = "'" <> T.replace "'" "'\\''" w <> "'"
+    plain c = isAlphaNum c || c `elem` ("-_./=:,@%+" :: String)
 
--- | Raw stdout lines. Exit 1 (no matches) is fine; exit >= 2 or exec failure is not.
-runCmd :: [Text] -> IO (Either Reason [Text])
-runCmd argv = case splitCmd argv of
-  Left why -> pure (Left (Rejected why))
-  Right (c, args) ->
-    try (readCreateProcessWithExitCode (proc c args) "") >>= \case
-      Left e -> pure (Left (ExecFailed (cs (show (e :: IOException)))))
-      Right (ExitFailure n, _, err) | n >= 2 -> pure (Left (ExecFailed (T.strip (cs err))))
-      Right (_, out, _) -> pure (Right (T.lines (cs out)))
+-- | Raw stdout lines of @bash -c cmd@. Exit 1 (no matches) is fine; exit >= 2 or exec failure is not.
+runCmd :: Text -> IO (Either Reason [Text])
+runCmd cmd
+  | T.null (T.strip cmd) = pure (Left (Rejected "empty command"))
+  | otherwise =
+      try (readCreateProcessWithExitCode (proc "bash" ["-c", cs cmd]) "") >>= \case
+        Left e -> pure (Left (ExecFailed (cs (show (e :: IOException)))))
+        Right (ExitFailure n, _, err) | n >= 2 -> pure (Left (ExecFailed (T.strip (cs err))))
+        Right (_, out, _) -> pure (Right (T.lines (cs out)))
 
 verdictFor :: Claim -> IO Verdict
 verdictFor c = case claimExpect c of

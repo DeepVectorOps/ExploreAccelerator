@@ -18,12 +18,13 @@ nix-shell   # dev shell
 ```
 expacc check NAME... [--print-all | --print-true | --print-false]
 expacc lint NAME...
-expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD ARG...
-expacc record-append NAME --id ID --text TEXT -- CMD ARG...
+expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- 'CMD'
+expacc record-append NAME --id ID --text TEXT -- 'CMD'
 expacc record-fix NAME ID
 ```
 
-`record` runs the command and stores its output as the expected output.
+`CMD` is one bash string, run with `bash -c`, so pipes and redirects work.
+`record` runs it and stores its output as the expected output.
 `check` also reports lint problems. `NAME` is a slug (`other`, or `other#id` for one claim) and resolves to `claims/other.claims.jsonl`
 in `$EXPACC_DIR` (default `./live-docs/explore`). Commands run from
 the current directory, so run it from the repo the claims describe.
@@ -52,7 +53,7 @@ preloaded.
 ### 1. Install expacc
 
 ```sh
-nix-env -if .      # installs expacc into ~/.nix-profile/bin
+nix-env -i -f default.nix   # installs expacc into ~/.nix-profile/bin
 ```
 
 ### 2. Configure Claude

@@ -17,9 +17,10 @@ usage =
   T.unlines
     [ "usage: expacc check NAME... [--print-all | --print-true | --print-false]"
     , "       expacc lint NAME..."
-    , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD ARG..."
-    , "       expacc record-append NAME --id ID --text TEXT -- CMD ARG..."
+    , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
+    , "       expacc record-append NAME --id ID --text TEXT -- CMD"
     , "       expacc record-fix NAME ID"
+    , "CMD is a bash string, run with bash -c; pipes and redirects work. Quote it as one argument."
     , "NAME is a slug (other, or other#id for one claim), resolved in $EXPACC_DIR/claims"
     , "(default ./live-docs/explore/claims). record runs CMD and stores its output as the"
     , "expected output; record creates the file, record-append adds a claim to it,"
@@ -47,8 +48,13 @@ parseFlags = go (Flags Nothing Nothing emptyHeader)
 
 newClaim :: Flags -> [Text] -> Either Text NewClaim
 newClaim f cmd = case (fId f, fText f) of
-  (Just i, Just t) -> Right (NewClaim i t cmd)
+  (Just i, Just t) -> Right (NewClaim i t (cmdOf cmd))
   _ -> Left "--id and --text are required"
+
+-- | One argument is a raw bash string; several are an argv, quoted into one.
+cmdOf :: [Text] -> Text
+cmdOf [c] = c
+cmdOf argv = quoteArgv argv
 
 finish :: Either Text Text -> IO ()
 finish = \case

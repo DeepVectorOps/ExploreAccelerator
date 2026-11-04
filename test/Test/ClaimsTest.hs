@@ -33,6 +33,12 @@ claimLine i t cmd ex =
   cs . encode $ object $
     ["id" .= i, "text" .= t, "cmd" .= cmd] <> maybe [] (\e -> ["expect" .= e]) ex
 
+-- | Claim whose cmd is a raw bash string.
+bashLine :: Text -> Text -> Maybe [Text] -> Text
+bashLine i cmd ex =
+  cs . encode $ object $
+    ["id" .= i, "text" .= i, "cmd" .= cmd] <> maybe [] (\e -> ["expect" .= e]) ex
+
 headerLine :: [Text] -> Text
 headerLine ds = cs (encode (object ["depends" .= ds]))
 
@@ -134,6 +140,12 @@ spec = describe "expacc replayable explore claims" $ do
     it "wc -l works" $ withData "a\nb\nc\n" $ \d f -> do
       rs <- run d [claimLine "w" "t" ["wc", "-l", cs f] (Just ["3 " <> cs f])]
       verdicts rs `shouldBe` [("w", VTrue)]
+    it "cmd is a raw bash string: pipes work" $ withData "needle\nhay\nneedle\n" $ \d f -> do
+      rs <- run d [bashLine "p" ("rg needle " <> cs f <> " | wc -l") (Just ["2"])]
+      verdicts rs `shouldBe` [("p", VTrue)]
+    it "an argv-array cmd from an older file still runs, quoted" $ withData "a b\n" $ \d f -> do
+      rs <- run d [claimLine "q" "t" ["rg", "-n", "a b", cs f] (Just ["1:a b"])]
+      verdicts rs `shouldBe` [("q", VTrue)]
     it "unparseable file yields BadFile" $ withTmp $ \d -> do
       writeClaims d "t" ["not json"]
       rs <- checkClaims d [ClaimsName "t"]
@@ -223,18 +235,16 @@ spec = describe "expacc replayable explore claims" $ do
           act d f
         good i f = rgClaim i f (Just ["1:needle"])
         header = cs . encode . object
-    it "check reports unknown header keys, duplicate ids and shell tokens as FALSE" $ withData $ \d f -> do
+    it "check reports unknown header keys, and duplicate ids as FALSE" $ withData $ \d f -> do
       writeClaims d "t"
         [ header ["doc" .= ("t.md" :: Text), "note" .= ("x" :: Text)]
         , good "a" f
         , good "a" f
-        , claimLine "p" "pipe" ["rg", "needle", "|", "wc"] (Just [])
         ]
       rs <- checkClaims d [ClaimsName "t"]
       [m | ClaimResult _ _ _ _ (VFalse (Lint m)) <- rs] `shouldBe`
         [ "unknown header key: note"
         , "duplicate claim id: a"
-        , "claim p: cmd is run without a shell, but contains |"
         ]
     it "lintFile finds the same problems without running commands" $ withData $ \d f -> do
       writeClaims d "t" [good "a" f, good "a" f]
@@ -244,7 +254,7 @@ spec = describe "expacc replayable explore claims" $ do
       lintFile d (ClaimsName "t") `shouldReturn` []
 
   describe "record" $ do
-    let nc i f = NewClaim i ("claim " <> i) ["rg", "-n", "needle", cs f]
+    let nc i f = NewClaim i ("claim " <> i) (quoteArgv ["rg", "-n", "needle", cs f])
         withData act = withTmp $ \d -> do
           let f = d </> "data.txt"
           TIO.writeFile f "needle one\nhay\nneedle two\n"
@@ -255,6 +265,11 @@ spec = describe "expacc replayable explore claims" $ do
       msg `shouldSatisfy` T.isInfixOf "1:needle one"
       rs <- checkClaims d [ClaimsName "r"]
       verdicts rs `shouldBe` [("a", VTrue)]
+    it "record runs a piped bash string and stores its output" $ withData $ \d f -> do
+      Right msg <- recordNew d (ClaimsName "r") emptyHeader (NewClaim "p" "p" ("rg needle " <> cs f <> " | wc -l"))
+      msg `shouldSatisfy` T.isInfixOf "(1 lines)"
+      rs <- checkClaims d [ClaimsName "r"]
+      verdicts rs `shouldBe` [("p", VTrue)]
     it "record writes the header, and refuses to overwrite an existing file" $ withData $ \d f -> do
       Right _ <- recordNew d (ClaimsName "r") (Header (Just "r.md") (Just "abc") [WholeFile (ClaimsName "dep")]) (nc "a" f)
       Right cf <- parseClaimsFile "r" <$> TIO.readFile (d </> "claims" </> "r.claims.jsonl")

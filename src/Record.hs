@@ -25,7 +25,7 @@ import System.FilePath (takeDirectory)
 data NewClaim = NewClaim
   { ncId :: Text
   , ncText :: Text
-  , ncCmd :: [Text]
+  , ncCmd :: Text
   }
 
 type Rec = ExceptT Text IO

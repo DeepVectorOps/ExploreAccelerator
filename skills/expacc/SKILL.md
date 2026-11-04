@@ -19,7 +19,7 @@ A claim is a statement, a bash command and the output that command must print. I
 - `text`: the statement.
 - `cmd`: one raw bash string, run with `bash -c` from the current directory. Pipes, redirects and globs all work.
 - `expect`: the stdout lines the command must print, compared exactly, including order. A negative claim ("X is not used in src") has `"expect": []`.
-  - `rg` output over several files is not ordered: use `--sort path`, or one file per claim.
+  - **Every `rg` in a claim command needs `--sort path`**, including each `rg` inside a pipe and searches over files you list yourself. `rg` searches files in parallel, so without it the line order changes from run to run and the claim flips between TRUE and FALSE ("same lines, different order"). The alternative is one file per claim. `| head` and `| sort` do not make an unsorted `rg` safe.
   - Exit code 1 (no matches) is a normal result; exit 2 or more is a failure.
 
 Optional first line, a header:
@@ -68,7 +68,7 @@ expacc lint NAME...
 ### Why a claim is FALSE
 
 - `output differs`: the diff shows expected against actual.
-- `same lines, different order`: make the output stable (`rg --sort path`).
+- `same lines, different order`: an `rg` in the command has no `--sort path`. Add it to every `rg`, edit `cmd` in your own claims file, then `record-fix` the claim.
 - `no expect recorded`: the claim has no `expect`.
 - `rejected`: empty command.
 - `exec failed`: the command could not run, or exited with 2 or more.

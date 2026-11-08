@@ -52,10 +52,10 @@ rgClaim :: Text -> FilePath -> Maybe [Text] -> Text
 rgClaim i f = claimLine i ("claim " <> i) ["rg", "-n", "needle", cs f]
 
 verdicts :: [ClaimResult] -> [(Text, Verdict)]
-verdicts rs = [(i, v) | ClaimResult _ (ClaimId i) _ _ v <- rs]
+verdicts rs = [(i, v) | ClaimResult {resId = ClaimId i, resVerdict = v} <- rs]
 
 ids :: [ClaimResult] -> [(Text, Text)]
-ids rs = [(n, i) | ClaimResult (ClaimsName n) (ClaimId i) _ _ _ <- rs]
+ids rs = [(n, i) | ClaimResult {resFile = ClaimsName n, resId = ClaimId i} <- rs]
 
 spec :: Spec
 spec = describe "expacc replayable explore claims" $ do
@@ -112,6 +112,11 @@ spec = describe "expacc replayable explore claims" $ do
     it "true claim" $ withData "needle one\nhay\nneedle two\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["1:needle one", "3:needle two"])]
       verdicts rs `shouldBe` [("a", VTrue)]
+      case rs of
+        [ClaimResult {resCmd = Just cmd, resOut = Just out}] -> do
+          cmd `shouldSatisfy` T.isInfixOf "rg"
+          out `shouldBe` ["1:needle one", "3:needle two"]
+        other -> expectationFailure (show other)
     it "line-number drift in expect is a Mismatch" $ withData "needle one\nhay\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["99:needle one"])]
       verdicts rs `shouldBe` [("a", VFalse (Mismatch ["99:needle one"] ["1:needle one"]))]
@@ -126,12 +131,18 @@ spec = describe "expacc replayable explore claims" $ do
     it "missing expect is NotRecorded" $ withData "needle\n" $ \d f -> do
       rs <- run d [rgClaim "a" f Nothing]
       verdicts rs `shouldBe` [("a", VFalse NotRecorded)]
+      case rs of
+        [ClaimResult {resCmd = Nothing, resOut = Nothing}] -> pure ()
+        other -> expectationFailure (show other)
     it "rejects an empty command" $ withData "needle\n" $ \d _ -> do
       rs <- run d [claimLine "empty" "t" [] (Just [])]
       verdicts rs `shouldBe` [("empty", VFalse (Rejected "empty command"))]
     it "no-match with expect [] is true" $ withData "hay\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just [])]
       verdicts rs `shouldBe` [("a", VTrue)]
+      case rs of
+        [ClaimResult {resOut = Just []}] -> pure ()
+        other -> expectationFailure (show other)
     it "rg on a nonexistent file is ExecFailed" $ withData "x\n" $ \d f -> do
       rs <- run d [rgClaim "a" (f <> ".nope") (Just [])]
       case verdicts rs of
@@ -159,7 +170,7 @@ spec = describe "expacc replayable explore claims" $ do
           TIO.writeFile f "needle\n"
           act d f
         good i f = rgClaim i f (Just ["1:needle"])
-        origins rs = [(i, o) | ClaimResult _ (ClaimId i) _ o _ <- rs]
+        origins rs = [(i, o) | ClaimResult {resId = ClaimId i, resOrigin = o} <- rs]
     it "whole-file dep pulls all claims as Dependency" $ withData $ \d f -> do
       writeClaims d "a" [headerLine ["b"], good "a1" f]
       writeClaims d "b" [good "b1" f, good "b2" f]
@@ -242,7 +253,7 @@ spec = describe "expacc replayable explore claims" $ do
         , good "a" f
         ]
       rs <- checkClaims d [ClaimsName "t"]
-      [m | ClaimResult _ _ _ _ (VFalse (Lint m)) <- rs] `shouldBe`
+      [m | ClaimResult {resVerdict = VFalse (Lint m)} <- rs] `shouldBe`
         [ "unknown header key: note"
         , "duplicate claim id: a"
         ]
@@ -302,9 +313,9 @@ spec = describe "expacc replayable explore claims" $ do
       recordFix d (ClaimsName "r") "zzz" >>= (`shouldSatisfy` either (T.isInfixOf "no claim zzz") (const False))
 
   describe "renderResults" $ do
-    let t = ClaimResult (ClaimsName "f") (ClaimId "t1") "good" Target VTrue
+    let t = ClaimResult (ClaimsName "f") (ClaimId "t1") "good" Target VTrue Nothing Nothing
         d = ClaimResult (ClaimsName "g") (ClaimId "d1") "dep bad" Dependency
-              (VFalse (Mismatch ["gone"] ["new"]))
+              (VFalse (Mismatch ["gone"] ["new"])) Nothing Nothing
         rs = [t, d]
         out m = renderResults m rs
     it "PrintFalse hides TRUE rows" $ do
@@ -324,7 +335,7 @@ spec = describe "expacc replayable explore claims" $ do
     it "diff keeps two lines of context and drops the rest" $ do
       let ls = ["l" <> cs (show i) | i <- [1 .. 10 :: Int]]
           r = ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target
-                (VFalse (Mismatch ls (take 9 ls <> ["new"])))
+                (VFalse (Mismatch ls (take 9 ls <> ["new"]))) Nothing Nothing
           txt = renderResults PrintFalse [r]
       txt `shouldSatisfy` T.isInfixOf "      l8\n      l9\n    - l10\n    + new"
       txt `shouldSatisfy` (not . T.isInfixOf "l1\n")
@@ -334,9 +345,21 @@ spec = describe "expacc replayable explore claims" $ do
     it "TRUE rows of Target have no (dep) marker" $
       out PrintTrue `shouldSatisfy` (not . T.isInfixOf "(dep)")
     it "prefixes missing dependency only when the miss is a dep" $ do
-      let miss o = ClaimResult (ClaimsName "f") (ClaimId "*") "" o (VFalse (MissingDep "no such claims file x"))
+      let miss o = ClaimResult (ClaimsName "f") (ClaimId "*") "" o (VFalse (MissingDep "no such claims file x")) Nothing Nothing
       renderResults PrintFalse [miss Target] `shouldSatisfy` (not . T.isInfixOf "missing dependency:")
       renderResults PrintFalse [miss Dependency] `shouldSatisfy` T.isInfixOf "missing dependency: no such claims file"
+    it "prints command and output lines for a shown claim" $ do
+      let r = ClaimResult (ClaimsName "f") (ClaimId "t1") "good" Target VTrue (Just "echo hi") (Just ["hi", "there"])
+          txt = renderResults PrintTrue [r]
+      txt `shouldSatisfy` T.isInfixOf "command: echo hi\noutput: hi\noutput: there\n"
+    it "marks a run that printed nothing" $ do
+      let r = ClaimResult (ClaimsName "f") (ClaimId "t1") "good" Target VTrue (Just "true") (Just [])
+      renderResults PrintTrue [r] `shouldSatisfy` T.isInfixOf "command: true\noutput:\n"
+    it "omits command and output when the claim did not run" $ do
+      let r = ClaimResult (ClaimsName "f") (ClaimId "*") "" Target (VFalse (MissingDep "x")) Nothing Nothing
+          txt = renderResults PrintFalse [r]
+      txt `shouldSatisfy` (not . T.isInfixOf "command:")
+      txt `shouldSatisfy` (not . T.isInfixOf "output:")
 
   describe "resolveExploreDir" $
     it "honours EXPACC_DIR and falls back to default" $ do

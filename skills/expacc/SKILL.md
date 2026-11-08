@@ -56,12 +56,12 @@ When the CLI cannot do what you need, edit your own claims file directly: reword
 ## Checking
 
 ```
-expacc check NAME... [--print-all | --print-true | --print-false]
+expacc check NAME... --print-all
 expacc lint NAME...
 ```
 
 - Run from the root of the repo the claims describe.
-- `--print-false` (default) shows failing claims with a diff; `--print-true` and `--print-all` show passing or all claims.
+- Use `expacc check NAME... --print-all`, not plain `check`. Each shown claim prints the command that ran and the output it printed, one prefix per line (`command: ...`, `output: ...`; a bare `output:` means it printed nothing). `--print-false` is the flag default and shows only failing claims; `--print-true` shows only passing claims. Prefer `--print-all`.
 - The last line is `OK: N true, 0 false` or `FAILED: N true, M false`. Exit code: `0` all true including dependencies, `1` any false, `2` bad usage.
 - `lint` reports file problems without running any command; `check` reports them too.
 

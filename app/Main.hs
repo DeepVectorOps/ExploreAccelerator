@@ -16,6 +16,7 @@ usage :: Text
 usage =
   T.unlines
     [ "usage: expacc check NAME... [--print-all | --print-true | --print-false]"
+    , "       shown claims print command: and output: lines"
     , "       expacc lint NAME..."
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
     , "       expacc record-append NAME --id ID --text TEXT -- CMD"

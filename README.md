@@ -30,12 +30,17 @@ in `$EXPACC_DIR` (default `./live-docs/explore`). Commands run from
 the current directory, so run it from the repo the claims describe.
 
 `--print-false` (default) shows only failing claims, with a diff; `--print-true`
-and `--print-all` show passing / all claims. Exit code: `0` all true, `1` any
-false, `2` bad usage.
+and `--print-all` show passing / all claims. Each shown claim also prints the
+command that ran and its stdout, prefixed `command:` and `output:`. Exit code:
+`0` all true, `1` any false, `2` bad usage.
 
 ```
 TRUE  auth-flow#login-handler  Login is handled in src/auth.js
+command: rg -n handleLogin src
+output: src/auth.js:42:export async function handleLogin(req, res) {
 FALSE auth-flow#token-ttl  Tokens expire after 1h  -- output differs
+command: rg -n TTL src/auth.js
+output: src/auth.js:const TTL = 7200;
     - src/auth.js:const TTL = 3600;
     + src/auth.js:const TTL = 7200;
 1 true, 1 false

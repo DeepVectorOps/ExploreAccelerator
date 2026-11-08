@@ -43,6 +43,8 @@ data ClaimResult = ClaimResult
   , resText :: Text
   , resOrigin :: Origin
   , resVerdict :: Verdict
+  , resCmd :: Maybe Text
+  , resOut :: Maybe [Text]
   }
   deriving stock (Eq, Show)
 
@@ -66,11 +68,22 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
       let ClaimsName n = resFile r
           ClaimId i = resId r
           label = n <> "#" <> i <> (if resOrigin r == Dependency then " (dep)" else "")
+          traced = commandLines (resCmd r) <> outputLines (resOut r)
        in case resVerdict r of
-            VTrue -> ["TRUE  " <> label <> "  " <> resText r]
+            VTrue -> ("TRUE  " <> label <> "  " <> resText r) : traced
             VFalse why ->
               ("FALSE " <> label <> "  " <> resText r <> "  -- " <> reasonText (resOrigin r) why)
-                : diffLines why
+                : traced
+                <> diffLines why
+    commandLines = \case
+      Nothing -> []
+      Just cmd -> case T.lines cmd of
+        [] -> ["command:"]
+        ls -> map ("command: " <>) ls
+    outputLines = \case
+      Nothing -> []
+      Just [] -> ["output:"]
+      Just ls -> map ("output: " <>) ls
     reasonText origin = \case
       Mismatch {} -> "output differs"
       Reordered {} -> "same lines, different order (sort the output, e.g. rg --sort path)"

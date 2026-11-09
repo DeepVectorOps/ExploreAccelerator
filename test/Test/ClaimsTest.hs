@@ -2,7 +2,9 @@ module Test.ClaimsTest (spec) where
 
 import Claims
 import Record
-import Control.Exception (IOException, bracket, catch, finally)
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (IOException, SomeException, bracket, catch, finally, try)
+import System.Timeout (timeout)
 import Data.Aeson (encode, object, (.=))
 import Data.Either (isLeft)
 import Data.List (isInfixOf)
@@ -298,6 +300,26 @@ spec = describe "expacc replayable explore claims" $ do
       e `shouldSatisfy` T.isInfixOf "record-fix"
       rs <- checkClaims d [ClaimsName "r"]
       verdicts rs `shouldBe` [("a", VTrue), ("b", VTrue)]
+    it "parallel record-append keeps both claims" $ withTmp $ \d -> do
+      Right _ <- recordNew d (ClaimsName "r") emptyHeader (NewClaim "base" "claim base" "echo base")
+      v1 <- newEmptyMVar
+      v2 <- newEmptyMVar
+      let go v nc = forkIO $ do
+            r <- try (recordAppend d (ClaimsName "r") nc)
+            putMVar v (r :: Either SomeException (Either Text Text))
+      _ <- go v1 (NewClaim "one" "claim one" "sleep 1; echo one")
+      _ <- go v2 (NewClaim "two" "claim two" "sleep 1; echo two")
+      m <- timeout (15 * 1000000) $ (,) <$> takeMVar v1 <*> takeMVar v2
+      case m of
+        Nothing -> expectationFailure "timed out waiting for parallel record-append"
+        Just (r1, r2) -> do
+          case (r1, r2) of
+            (Right (Right _), Right (Right _)) -> pure ()
+            other -> expectationFailure ("parallel record-append results: " <> show other)
+          Right cf <- parseClaimsFile "r" <$> TIO.readFile (d </> "claims" </> "r.claims.jsonl")
+          let got = map claimId (cfClaims cf)
+          got `shouldSatisfy` (ClaimId "one" `elem`)
+          got `shouldSatisfy` (ClaimId "two" `elem`)
     it "record-fix rewrites only that claim's expect and shows the diff" $ withData $ \d f -> do
       Right _ <- recordNew d (ClaimsName "r") (Header (Just "r.md") Nothing []) (nc "a" f)
       Right _ <- recordAppend d (ClaimsName "r") (nc "b" f)

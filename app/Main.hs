@@ -2,12 +2,14 @@ module Main (main) where
 
 import Claims
 import Record
+import Control.Monad (unless)
 import Data.List (partition)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
+import System.Directory (doesDirectoryExist)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitWith)
 import System.IO (stderr)
@@ -72,6 +74,20 @@ usageError e = TIO.hPutStrLn stderr ("expacc: " <> e) >> exitWith (ExitFailure 2
 requireName :: Text -> IO ClaimsName
 requireName = either usageError pure . parseClaimsName
 
+-- | A missing explore dir means the command was not run from the repo root
+-- (or EXPACC_DIR is wrong), not that the named claims files are absent.
+requireExploreDir :: FilePath -> IO ()
+requireExploreDir dir = do
+  ok <- doesDirectoryExist dir
+  unless ok $ TIO.hPutStrLn stderr (missingExploreDir dir) >> exitWith (ExitFailure 1)
+
+missingExploreDir :: FilePath -> Text
+missingExploreDir dir
+  | dir == "./live-docs/explore" =
+      "no live-docs/explore/ dir found check if run from correct place."
+  | otherwise =
+      "no " <> cs dir <> "/ dir found check if run from correct place."
+
 main :: IO ()
 main = do
   setLocaleEncoding utf8
@@ -81,11 +97,13 @@ main = do
     "check" : rest
       | (flags, names@(_ : _)) <- partition ("--" `T.isPrefixOf`) rest
       , Just modes <- mapM (`lookup` printFlags) flags -> do
+          requireExploreDir dir
           parsed <- traverse requireName names
           results <- checkClaims dir parsed
           TIO.putStr (renderResults (last (PrintFalse : modes)) results)
           exitWith (if allTrue results then ExitSuccess else ExitFailure 1)
     "lint" : names@(_ : _) -> do
+      requireExploreDir dir
       parsed <- traverse requireName names
       problems <- concat <$> mapM (\n -> map (\p -> let ClaimsName t = n in t <> ": " <> p) <$> lintFile dir n) parsed
       TIO.putStr (T.unlines (if null problems then ["OK: no problems"] else problems))

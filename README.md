@@ -21,6 +21,7 @@ expacc lint NAME...
 expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- 'CMD'
 expacc record-append NAME --id ID --text TEXT -- 'CMD'
 expacc record-fix NAME ID
+expacc prune [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]
 ```
 
 `CMD` is one bash string, run with `bash -c`, so pipes and redirects work.
@@ -28,6 +29,13 @@ expacc record-fix NAME ID
 `check` also reports lint problems. `NAME` is a slug (`other`, or `other#id` for one claim) and resolves to `claims/other.claims.jsonl`
 in `$EXPACC_DIR` (default `./live-docs/explore`). Commands run from
 the current directory, so run it from the repo the claims describe.
+
+`prune` deletes docs in `$EXPACC_DIR/*.md` together with their claims file.
+`--delete-if-older 7d` (units `d`/`h`/`m`/`s`, by file mtime) and
+`--delete-if-inaccurate 0.5` (true/total claims below the ratio) apply only to
+docs with a claims file and are ANDed when both are given;
+`--delete-if-missing-claim` separately deletes docs with no claims file. It
+prints `deleted SLUG (reasons)` per doc and `N deleted`.
 
 `--print-false` (default) shows only failing claims, with a diff; `--print-true`
 and `--print-all` show passing / all claims. Each shown claim also prints the

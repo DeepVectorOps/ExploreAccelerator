@@ -21,6 +21,7 @@ dependencies:
 - process
 - string-conversions
 - text
+- time
 - transformers
 - unix
 

@@ -1,11 +1,13 @@
 module Main (main) where
 
 import Claims
+import Prune
 import Record
 import Control.Monad (unless)
 import Data.List (partition)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
+import Data.Time (getCurrentTime)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
@@ -23,11 +25,14 @@ usage =
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
     , "       expacc record-append NAME --id ID --text TEXT -- CMD"
     , "       expacc record-fix NAME ID"
+    , "       expacc prune [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]"
     , "CMD is a bash string, run with bash -c; pipes and redirects work. Quote it as one argument."
     , "NAME is a slug (other, or other#id for one claim), resolved in $EXPACC_DIR/claims"
     , "(default ./live-docs/explore/claims). record runs CMD and stores its output as the"
     , "expected output; record creates the file, record-append adds a claim to it,"
     , "record-fix re-runs a claim and rewrites its expected output."
+    , "prune deletes docs (and their claims) that are older than DUR (7d, 1h, 30m, 45s) AND"
+    , "have a true-claim ratio below RATIO, or that have no claims file."
     ]
 
 data Flags = Flags
@@ -58,6 +63,30 @@ newClaim f cmd = case (fId f, fText f) of
 cmdOf :: [Text] -> Text
 cmdOf [c] = c
 cmdOf argv = quoteArgv argv
+
+parsePruneOpts :: [Text] -> Either Text PruneOpts
+parsePruneOpts = go (PruneOpts Nothing Nothing False)
+  where
+    go o [] = Right o
+    go o ("--delete-if-older" : v : r) = parseDuration v >>= \d -> go o {poOlder = Just d} r
+    go o ("--delete-if-inaccurate" : v : r) = parseRatio v >>= \x -> go o {poInaccurate = Just x} r
+    go o ("--delete-if-missing-claim" : r) = go o {poMissing = True} r
+    go _ (x : _) = Left ("unknown or incomplete option: " <> x)
+
+prune :: FilePath -> PruneOpts -> IO ()
+prune dir o = do
+  docs <- listDocs dir =<< getCurrentTime
+  deleted <- fmap concat . mapM pruneOne $ docs
+  TIO.putStrLn (cs (show (length deleted)) <> " deleted")
+  where
+    pruneOne d = do
+      score <- if needsCheck o d then Just . scoreOf <$> checkClaims dir [ClaimsName (docSlug d)] else pure Nothing
+      case decide o d score of
+        [] -> pure []
+        whys -> do
+          deleteDoc dir d
+          TIO.putStrLn ("deleted " <> docSlug d <> " (" <> T.intercalate ", " (map renderWhy whys) <> ")")
+          pure [d]
 
 finish :: Either Text Text -> IO ()
 finish = \case
@@ -117,6 +146,10 @@ main = do
               n <- requireName name
               (if cmd == "record" then recordNew dir n (fHeader f) nc else recordAppend dir n nc) >>= finish
     ["record-fix", name, cid] -> requireName name >>= \n -> recordFix dir n cid >>= finish
+    "prune" : flags@(_ : _) -> do
+      o <- either usageError pure (parsePruneOpts flags)
+      requireExploreDir dir
+      prune dir o
     ["--help"] -> TIO.putStr usage
     [] -> TIO.putStr usage
     _ -> TIO.hPutStrLn stderr usage >> exitWith (ExitFailure 2)

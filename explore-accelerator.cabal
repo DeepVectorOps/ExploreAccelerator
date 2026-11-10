@@ -18,6 +18,7 @@ library
       Claims.Quote
       Claims.Result
       Claims.Run
+      Prune
       Record
   other-modules:
       Paths_explore_accelerator
@@ -39,6 +40,7 @@ library
     , process
     , string-conversions
     , text
+    , time
     , transformers
     , unix
   default-language: GHC2021
@@ -67,6 +69,7 @@ executable expacc
     , process
     , string-conversions
     , text
+    , time
     , transformers
     , unix
   default-language: GHC2021
@@ -76,6 +79,7 @@ test-suite spec
   main-is: Main.hs
   other-modules:
       Test.ClaimsTest
+      Test.PruneTest
       Paths_explore_accelerator
   hs-source-dirs:
       test
@@ -97,6 +101,7 @@ test-suite spec
     , process
     , string-conversions
     , text
+    , time
     , transformers
     , unix
   default-language: GHC2021

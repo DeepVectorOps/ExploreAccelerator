@@ -51,8 +51,10 @@ output: src/auth.js:const TTL = 7200;
 [agents/AcceleratedExplore.md](agents/AcceleratedExplore.md) is a Claude Code
 subagent that works like the built-in Explore agent, but records its answer.
 It checks prior notes in `live-docs/explore/` with `expacc`, investigates only
-the gaps, writes `live-docs/explore/<slug>.md` plus a claims file, and replies
-with just the path to the note. It runs on Haiku and has the `expacc` skill
+the gaps, writes `live-docs/explore/<slug>.md`, and messages the parent the
+path straight away so it isn't kept waiting. Only then does it record and check
+the claims file (best effort; the note itself is never edited afterwards), and
+it finishes by replying with just the path. It runs on Haiku and has the `expacc` skill
 preloaded.
 
 ### 1. Install expacc

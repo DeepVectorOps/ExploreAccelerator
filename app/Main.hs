@@ -21,7 +21,7 @@ usage =
   T.unlines
     [ "usage: expacc check NAME... [--print-all | --print-true | --print-false | --minimal-output]"
     , "       shown claims print command: and output: lines"
-    , "       --minimal-output prints only the totals, plus id and command of each false claim"
+    , "       --minimal-output prints only the totals, plus FALSE id and command of each false claim"
     , "       expacc lint NAME..."
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
     , "       expacc record-append NAME --id ID --text TEXT -- CMD"

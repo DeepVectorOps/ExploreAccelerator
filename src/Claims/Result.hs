@@ -71,7 +71,7 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
           label = n <> "#" <> i <> (if resOrigin r == Dependency then " (dep)" else "")
           traced = commandLines (resCmd r) <> outputLines (resOut r)
        in case (mode, resVerdict r) of
-            (PrintMinimal, VFalse _) -> label : commandLines (resCmd r)
+            (PrintMinimal, VFalse _) -> ("FALSE " <> label) : commandLines (resCmd r)
             (_, VTrue) -> ("TRUE  " <> label <> "  " <> resText r) : traced
             (_, VFalse why) ->
               ("FALSE " <> label <> "  " <> resText r <> "  -- " <> reasonText (resOrigin r) why)

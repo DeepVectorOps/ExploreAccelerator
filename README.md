@@ -45,7 +45,7 @@ file list without removing anything. The summary is still `N deleted`.
 and `--print-all` show passing / all claims. Each shown claim also prints the
 command that ran and its stdout, prefixed `command:` and `output:`.
 `--minimal-output` prints only the summary totals, and for each false claim
-just its id and the command that failed. Exit code:
+`FALSE file#id` and the command that failed. Exit code:
 `0` all true, `1` any false, `2` bad usage.
 
 ```

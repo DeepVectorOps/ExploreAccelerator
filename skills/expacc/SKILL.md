@@ -57,11 +57,13 @@ When the CLI cannot do what you need, edit your own claims file directly: reword
 
 ```
 expacc check NAME... --print-all
+expacc check NAME... --minimal-output
 expacc lint NAME...
 ```
 
 - Run from the root of the repo the claims describe.
 - Use `expacc check NAME... --print-all`, not plain `check`. Each shown claim prints the command that ran and the output it printed, one prefix per line (`command: ...`, `output: ...`; a bare `output:` means it printed nothing). `--print-false` is the flag default and shows only failing claims; `--print-true` shows only passing claims. Prefer `--print-all`.
+- `--minimal-output` prints only the summary (`OK: N true, M false` or `FAILED: N true, M false`) and, for each false claim, its id and the command that failed. No diffs, no stdout.
 - The last line is `OK: N true, 0 false` or `FAILED: N true, M false`. Exit code: `0` all true including dependencies, `1` any false, `2` bad usage.
 - `lint` reports file problems without running any command; `check` reports them too.
 

@@ -48,7 +48,7 @@ data ClaimResult = ClaimResult
   }
   deriving stock (Eq, Show)
 
-data PrintMode = PrintAll | PrintTrue | PrintFalse
+data PrintMode = PrintAll | PrintTrue | PrintFalse | PrintMinimal
   deriving stock (Eq, Show)
 
 allTrue :: [ClaimResult] -> Bool
@@ -61,6 +61,7 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
       (PrintAll, _) -> True
       (PrintTrue, VTrue) -> True
       (PrintFalse, VFalse _) -> True
+      (PrintMinimal, VFalse _) -> True
       _ -> False
     summary = (if allTrue rs then "OK: " else "FAILED: ") <> cs (show (count True) <> " true, " <> show (count False) <> " false")
     count b = length [() | r <- rs, (resVerdict r == VTrue) == b]
@@ -69,9 +70,10 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
           ClaimId i = resId r
           label = n <> "#" <> i <> (if resOrigin r == Dependency then " (dep)" else "")
           traced = commandLines (resCmd r) <> outputLines (resOut r)
-       in case resVerdict r of
-            VTrue -> ("TRUE  " <> label <> "  " <> resText r) : traced
-            VFalse why ->
+       in case (mode, resVerdict r) of
+            (PrintMinimal, VFalse _) -> label : commandLines (resCmd r)
+            (_, VTrue) -> ("TRUE  " <> label <> "  " <> resText r) : traced
+            (_, VFalse why) ->
               ("FALSE " <> label <> "  " <> resText r <> "  -- " <> reasonText (resOrigin r) why)
                 : traced
                 <> diffLines why

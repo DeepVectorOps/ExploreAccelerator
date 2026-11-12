@@ -19,8 +19,9 @@ import System.IO (stderr)
 usage :: Text
 usage =
   T.unlines
-    [ "usage: expacc check NAME... [--print-all | --print-true | --print-false]"
+    [ "usage: expacc check NAME... [--print-all | --print-true | --print-false | --minimal-output]"
     , "       shown claims print command: and output: lines"
+    , "       --minimal-output prints only the totals, plus id and command of each false claim"
     , "       expacc lint NAME..."
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
     , "       expacc record-append NAME --id ID --text TEXT -- CMD"
@@ -101,7 +102,7 @@ finish = \case
   Left err -> TIO.hPutStrLn stderr ("expacc: " <> err) >> exitWith (ExitFailure 1)
 
 printFlags :: [(Text, PrintMode)]
-printFlags = [("--print-all", PrintAll), ("--print-true", PrintTrue), ("--print-false", PrintFalse)]
+printFlags = [("--print-all", PrintAll), ("--print-true", PrintTrue), ("--print-false", PrintFalse), ("--minimal-output", PrintMinimal)]
 
 -- | A bad name is a usage error (exit 2), not a failed check.
 usageError :: Text -> IO a

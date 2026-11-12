@@ -340,6 +340,16 @@ spec = describe "expacc replayable explore claims" $ do
               (VFalse (Mismatch ["gone"] ["new"])) Nothing Nothing
         rs = [t, d]
         out m = renderResults m rs
+    it "PrintMinimal shows only false ids, their commands, and the totals" $ do
+      let bad = d {resCmd = Just "rg -n needle src"}
+          txt = renderResults PrintMinimal [t, bad]
+      txt `shouldSatisfy` (not . T.isInfixOf "TRUE")
+      txt `shouldSatisfy` (not . T.isInfixOf "FALSE")
+      txt `shouldSatisfy` (not . T.isInfixOf "output:")
+      txt `shouldSatisfy` (not . T.isInfixOf "gone")
+      txt `shouldSatisfy` T.isInfixOf "g#d1 (dep)\ncommand: rg -n needle src\n"
+      txt `shouldSatisfy` T.isInfixOf "FAILED: 1 true, 1 false"
+      renderResults PrintMinimal [t] `shouldBe` "OK: 1 true, 0 false\n"
     it "PrintFalse hides TRUE rows" $ do
       out PrintFalse `shouldSatisfy` (not . T.isInfixOf "TRUE")
       out PrintFalse `shouldSatisfy` T.isInfixOf "FALSE g#d1 (dep)"

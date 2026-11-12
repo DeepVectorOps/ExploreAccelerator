@@ -21,7 +21,7 @@ expacc lint NAME...
 expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- 'CMD'
 expacc record-append NAME --id ID --text TEXT -- 'CMD'
 expacc record-fix NAME ID
-expacc prune [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]
+expacc prune [--dry-run] [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]
 ```
 
 `CMD` is one bash string, run with `bash -c`, so pipes and redirects work.
@@ -35,7 +35,9 @@ the current directory, so run it from the repo the claims describe.
 `--delete-if-inaccurate 0.5` (true/total claims below the ratio) apply only to
 docs with a claims file and are ANDed when both are given;
 `--delete-if-missing-claim` separately deletes docs with no claims file. It
-prints `deleted SLUG (reasons)` per doc and `N deleted`.
+prints `deleted SLUG (reasons)` and each file removed. `--dry-run` prints
+`would delete` and the same file list without removing anything. The summary
+is still `N deleted`.
 
 `--print-false` (default) shows only failing claims, with a diff; `--print-true`
 and `--print-all` show passing / all claims. Each shown claim also prints the

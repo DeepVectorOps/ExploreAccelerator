@@ -25,7 +25,7 @@ usage =
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
     , "       expacc record-append NAME --id ID --text TEXT -- CMD"
     , "       expacc record-fix NAME ID"
-    , "       expacc prune [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]"
+    , "       expacc prune [--dry-run] [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]"
     , "CMD is a bash string, run with bash -c; pipes and redirects work. Quote it as one argument."
     , "NAME is a slug (other, or other#id for one claim), resolved in $EXPACC_DIR/claims"
     , "(default ./live-docs/explore/claims). record runs CMD and stores its output as the"
@@ -33,6 +33,8 @@ usage =
     , "record-fix re-runs a claim and rewrites its expected output."
     , "prune deletes docs (and their claims) that are older than DUR (7d, 1h, 30m, 45s) AND"
     , "have a true-claim ratio below RATIO, or that have no claims file."
+    , "--dry-run lists the files that would be removed and deletes nothing."
+    , "Each deleted doc prints the reasons and the files removed."
     ]
 
 data Flags = Flags
@@ -65,9 +67,10 @@ cmdOf [c] = c
 cmdOf argv = quoteArgv argv
 
 parsePruneOpts :: [Text] -> Either Text PruneOpts
-parsePruneOpts = go (PruneOpts Nothing Nothing False)
+parsePruneOpts = go (PruneOpts Nothing Nothing False False)
   where
     go o [] = Right o
+    go o ("--dry-run" : r) = go o {poDryRun = True} r
     go o ("--delete-if-older" : v : r) = parseDuration v >>= \d -> go o {poOlder = Just d} r
     go o ("--delete-if-inaccurate" : v : r) = parseRatio v >>= \x -> go o {poInaccurate = Just x} r
     go o ("--delete-if-missing-claim" : r) = go o {poMissing = True} r
@@ -84,8 +87,10 @@ prune dir o = do
       case decide o d score of
         [] -> pure []
         whys -> do
-          deleteDoc dir d
-          TIO.putStrLn ("deleted " <> docSlug d <> " (" <> T.intercalate ", " (map renderWhy whys) <> ")")
+          files <- if poDryRun o then filesToDelete dir d else deleteDoc dir d
+          let verb = if poDryRun o then "would delete " else "deleted "
+          TIO.putStrLn (verb <> docSlug d <> " (" <> T.intercalate ", " (map renderWhy whys) <> ")")
+          mapM_ (TIO.putStrLn . ("  " <>) . cs) files
           pure [d]
 
 finish :: Either Text Text -> IO ()

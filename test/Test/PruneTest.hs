@@ -21,9 +21,9 @@ spec = describe "prune" $ do
       mapM_ ((`shouldSatisfy` isLeft) . parseRatio) ["1.1", "-0.1", "x", ""]
 
   describe "decide" $ do
-    let older h = PruneOpts (Just (h * 3600)) Nothing False
-        inacc r = PruneOpts Nothing (Just r) False
-        both h r = PruneOpts (Just (h * 3600)) (Just r) False
+    let older h = PruneOpts (Just (h * 3600)) Nothing False False
+        inacc r = PruneOpts Nothing (Just r) False False
+        both h r = PruneOpts (Just (h * 3600)) (Just r) False False
     it "older only" $ do
       decide (older 1) (doc True) Nothing `shouldBe` [Older]
       decide (older 3) (doc True) Nothing `shouldBe` []
@@ -44,5 +44,5 @@ spec = describe "prune" $ do
       needsCheck (older 1) (doc True) `shouldBe` False
     it "ignores docs without claims unless --delete-if-missing-claim" $ do
       decide (both 1 1) (doc False) Nothing `shouldBe` []
-      decide (PruneOpts Nothing Nothing True) (doc False) Nothing `shouldBe` [MissingClaims]
-      decide (PruneOpts Nothing Nothing True) (doc True) Nothing `shouldBe` []
+      decide (PruneOpts Nothing Nothing True False) (doc False) Nothing `shouldBe` [MissingClaims]
+      decide (PruneOpts Nothing Nothing True False) (doc True) Nothing `shouldBe` []

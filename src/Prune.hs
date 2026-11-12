@@ -13,12 +13,13 @@ module Prune
   , renderWhy
   , listDocs
   , scoreOf
+  , filesToDelete
   , deleteDoc
   ) where
 
 import Claims.Name
 import Claims.Result
-import Control.Monad (filterM, when)
+import Control.Monad (filterM)
 import Data.Char (isDigit)
 import Data.List (isSuffixOf, sort)
 import Data.Maybe (catMaybes, isJust)
@@ -34,6 +35,7 @@ data PruneOpts = PruneOpts
   { poOlder :: Maybe NominalDiffTime
   , poInaccurate :: Maybe Double
   , poMissing :: Bool
+  , poDryRun :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -109,11 +111,20 @@ scoreOf rs = (length (filter ((== VTrue) . resVerdict) own), length own)
       VFalse (Lint _) -> True
       _ -> False
 
-deleteDoc :: FilePath -> Doc -> IO ()
+-- | Paths 'deleteDoc' would remove: the note, its claims file, and the lock
+-- if that file exists.
+filesToDelete :: FilePath -> Doc -> IO [FilePath]
+filesToDelete dir d = do
+  let md = dir </> cs (docSlug d) <> ".md"
+      claims = claimsPath dir (ClaimsName (docSlug d))
+  lockExists <- doesFileExist (claims <> ".lock")
+  pure $
+    md
+      : [claims | docHasClaims d]
+      ++ [claims <> ".lock" | docHasClaims d && lockExists]
+
+deleteDoc :: FilePath -> Doc -> IO [FilePath]
 deleteDoc dir d = do
-  removeFile (dir </> cs (docSlug d) <> ".md")
-  when (docHasClaims d) $ do
-    let claims = claimsPath dir (ClaimsName (docSlug d))
-    removeFile claims
-    lockExists <- doesFileExist (claims <> ".lock")
-    when lockExists $ removeFile (claims <> ".lock")
+  files <- filesToDelete dir d
+  mapM_ removeFile files
+  pure files

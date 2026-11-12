@@ -48,3 +48,6 @@ spec = describe "prune" $ do
       decide (both 1 1) (doc False) Nothing `shouldBe` []
       decide (PruneOpts Nothing Nothing True False) (doc False) Nothing `shouldBe` [MissingClaims]
       decide (PruneOpts Nothing Nothing True False) (doc True) Nothing `shouldBe` []
+    it "ANDs older into missing-claim deletes" $ do
+      decide (PruneOpts (Just 3600) Nothing True False) (doc False) Nothing `shouldBe` [Older, MissingClaims]
+      decide (PruneOpts (Just (3 * 3600)) Nothing True False) (doc False) Nothing `shouldBe` []

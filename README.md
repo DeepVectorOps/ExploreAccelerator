@@ -34,8 +34,9 @@ the current directory, so run it from the repo the claims describe.
 `--delete-if-older 7d` (units `d`/`h`/`m`/`s`, by file mtime) and
 `--delete-if-inaccurate 0.5` (true/total claims below the ratio) apply only to
 docs with a claims file and are ANDed when both are given;
-`--delete-if-missing-claim` separately deletes docs with no claims file. It
-prints `deleted SLUG (reasons)` and each file removed. A low true-claim
+`--delete-if-missing-claim` separately deletes docs with no claims file.
+`--delete-if-older` also applies to those when both are given, so a young
+doc with no claims file is kept. It prints `deleted SLUG (reasons)` and each file removed. A low true-claim
 ratio is reported as `T/N claims true, below RATIO` (true claims over total,
 not inaccurate over total). `--dry-run` prints `would delete` and the same
 file list without removing anything. The summary is still `N deleted`.

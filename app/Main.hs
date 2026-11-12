@@ -33,6 +33,7 @@ usage =
     , "record-fix re-runs a claim and rewrites its expected output."
     , "prune deletes docs (and their claims) that are older than DUR (7d, 1h, 30m, 45s) AND"
     , "have a true-claim ratio below RATIO, or that have no claims file."
+    , "--delete-if-older also filters --delete-if-missing-claim when both are given."
     , "--dry-run lists the files that would be removed and deletes nothing."
     , "Each deleted doc prints the reasons and the files removed."
     , "A low true-claim ratio is reported as T/N claims true, below RATIO (true/total, not inaccurate/total)."

@@ -72,11 +72,12 @@ needsCheck :: PruneOpts -> Doc -> Bool
 needsCheck o d = docHasClaims d && isJust (poInaccurate o) && olderOk o d /= Just False
 
 -- | Reasons to delete (empty keeps the doc). The score is (true, total)
--- claims, present when 'needsCheck' held. Older and inaccurate are ANDed;
--- missing claims is a separate rule.
+-- claims, present when 'needsCheck' held. Older and inaccurate are ANDed
+-- for docs with claims. Missing claims is a separate rule; when
+-- '--delete-if-older' is also set, the doc must pass that age filter too.
 decide :: PruneOpts -> Doc -> Maybe (Int, Int) -> [Why]
 decide o d score
-  | not (docHasClaims d) = [MissingClaims | poMissing o]
+  | not (docHasClaims d) = missing
   | null rules || not (all fst rules) = []
   | otherwise = map snd rules
   where
@@ -84,6 +85,12 @@ decide o d score
     inaccurate r = case score of
       Just (t, n) -> (if n == 0 then r > 0 else fromIntegral t / fromIntegral n < r, Inaccurate t n r)
       Nothing -> (False, Inaccurate 0 0 r)
+    missing
+      | not (poMissing o) = []
+      | otherwise = case olderOk o d of
+          Just False -> []
+          Just True -> [Older, MissingClaims]
+          Nothing -> [MissingClaims]
 
 renderWhy :: Why -> Text
 renderWhy = \case

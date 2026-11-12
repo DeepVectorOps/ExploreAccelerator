@@ -28,13 +28,15 @@ spec = describe "prune" $ do
       decide (older 1) (doc True) Nothing `shouldBe` [Older]
       decide (older 3) (doc True) Nothing `shouldBe` []
     it "inaccurate only" $ do
-      decide (inacc 0.5) (doc True) (Just (1, 4)) `shouldBe` [Inaccurate 1 4]
+      decide (inacc 0.5) (doc True) (Just (1, 4)) `shouldBe` [Inaccurate 1 4 0.5]
       decide (inacc 0.5) (doc True) (Just (2, 4)) `shouldBe` []
     it "zero claims qualify only when the ratio is positive" $ do
-      decide (inacc 0.1) (doc True) (Just (0, 0)) `shouldBe` [Inaccurate 0 0]
+      decide (inacc 0.1) (doc True) (Just (0, 0)) `shouldBe` [Inaccurate 0 0 0.1]
       decide (inacc 0) (doc True) (Just (0, 0)) `shouldBe` []
+    it "reports true/total against the cutoff" $
+      renderWhy (Inaccurate 3 12 0.5) `shouldBe` "3/12 claims true, below 0.5"
     it "ANDs older and inaccurate" $ do
-      decide (both 1 0.5) (doc True) (Just (1, 4)) `shouldBe` [Older, Inaccurate 1 4]
+      decide (both 1 0.5) (doc True) (Just (1, 4)) `shouldBe` [Older, Inaccurate 1 4 0.5]
       decide (both 1 0.5) (doc True) (Just (4, 4)) `shouldBe` []
       decide (both 3 0.5) (doc True) Nothing `shouldBe` []
     it "skips the check for docs too young or without claims" $ do

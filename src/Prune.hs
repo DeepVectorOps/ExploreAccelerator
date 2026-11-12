@@ -39,7 +39,7 @@ data PruneOpts = PruneOpts
   }
   deriving stock (Eq, Show)
 
-data Why = Older | Inaccurate Int Int | MissingClaims
+data Why = Older | Inaccurate Int Int Double | MissingClaims
   deriving stock (Eq, Show)
 
 data Doc = Doc
@@ -82,13 +82,13 @@ decide o d score
   where
     rules = catMaybes [(,Older) <$> olderOk o d, inaccurate <$> poInaccurate o]
     inaccurate r = case score of
-      Just (t, n) -> (if n == 0 then r > 0 else fromIntegral t / fromIntegral n < r, Inaccurate t n)
-      Nothing -> (False, Inaccurate 0 0)
+      Just (t, n) -> (if n == 0 then r > 0 else fromIntegral t / fromIntegral n < r, Inaccurate t n r)
+      Nothing -> (False, Inaccurate 0 0 r)
 
 renderWhy :: Why -> Text
 renderWhy = \case
   Older -> "older"
-  Inaccurate t n -> "inaccurate " <> cs (show t) <> "/" <> cs (show n)
+  Inaccurate t n r -> cs (show t) <> "/" <> cs (show n) <> " claims true, below " <> cs (show r)
   MissingClaims -> "missing claims"
 
 -- | Docs directly in the explore dir, sorted by slug.

@@ -35,9 +35,10 @@ the current directory, so run it from the repo the claims describe.
 `--delete-if-inaccurate 0.5` (true/total claims below the ratio) apply only to
 docs with a claims file and are ANDed when both are given;
 `--delete-if-missing-claim` separately deletes docs with no claims file. It
-prints `deleted SLUG (reasons)` and each file removed. `--dry-run` prints
-`would delete` and the same file list without removing anything. The summary
-is still `N deleted`.
+prints `deleted SLUG (reasons)` and each file removed. A low true-claim
+ratio is reported as `T/N claims true, below RATIO` (true claims over total,
+not inaccurate over total). `--dry-run` prints `would delete` and the same
+file list without removing anything. The summary is still `N deleted`.
 
 `--print-false` (default) shows only failing claims, with a diff; `--print-true`
 and `--print-all` show passing / all claims. Each shown claim also prints the

@@ -35,6 +35,7 @@ usage =
     , "have a true-claim ratio below RATIO, or that have no claims file."
     , "--dry-run lists the files that would be removed and deletes nothing."
     , "Each deleted doc prints the reasons and the files removed."
+    , "A low true-claim ratio is reported as T/N claims true, below RATIO (true/total, not inaccurate/total)."
     ]
 
 data Flags = Flags

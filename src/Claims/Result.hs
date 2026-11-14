@@ -62,7 +62,7 @@ allTrue :: [ClaimResult] -> Bool
 allTrue = all ((== VTrue) . resVerdict)
 
 renderResults :: PrintMode -> [ClaimResult] -> Text
-renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summary])
+renderResults mode rs = T.unlines (intercalate [""] (map render (filter shown rs) <> [[summary]]))
   where
     shown r = case (mode, resVerdict r) of
       (PrintAll, _) -> True

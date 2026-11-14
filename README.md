@@ -61,11 +61,13 @@ recorded `expect` and the `output:` trace stay raw rg output.
 TRUE  auth-flow#login-handler  Login is handled in src/auth.js
 command: rg -n handleLogin src
 output: src/auth.js:42:export async function handleLogin(req, res) {
+
 FALSE auth-flow#token-ttl  Tokens expire after 1h  -- output differs
 command: rg -n TTL src/auth.js
 output: src/auth.js:const TTL = 7200;
     - src/auth.js:const TTL = 3600;
     + src/auth.js:const TTL = 7200;
+
 1 true, 1 false
 ```
 

@@ -47,9 +47,16 @@ compareOutput cmd e a
   | Just be <- grouped e
   , Just ba <- grouped a =
       let moved = [(blockHeader x, blockHeader y, bStart y - bStart x) | (x, y) <- zip be ba, bStart x /= bStart y]
+          -- offsets are only meaningful when blocks pair up one to one
+          movedAlso
+            | length be == length ba = [m | (m, (x, y)) <- zip moved' (zip be ba), bFile x == bFile y, isMove m]
+            | otherwise = []
+            where
+              moved' = [(blockHeader x, blockHeader y, bStart y - bStart x) | (x, y) <- zip be ba]
+              isMove (_, _, d) = d /= 0
        in if map content be == map content ba && not (null moved)
             then VFalse (Shifted moved)
-            else VFalse (RgMismatch (renderBlocks be) (renderBlocks ba))
+            else VFalse (RgMismatch movedAlso (renderBlocks be) (renderBlocks ba))
   | otherwise = VFalse (Mismatch e a)
   where
     grouped ls

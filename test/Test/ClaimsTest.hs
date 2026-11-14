@@ -128,7 +128,7 @@ spec = describe "expacc replayable explore claims" $ do
     it "content change in rg -n output diffs the grouped blocks" $ withData "needle one\nneedle new\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["1:needle one", "2:needle old"])]
       verdicts rs `shouldBe`
-        [("a", VFalse (RgMismatch ["lines 1-2", "  needle one", "  needle old"] ["lines 1-2", "  needle one", "  needle new"]))]
+        [("a", VFalse (RgMismatch [] ["lines 1-2", "  needle one", "  needle old"] ["lines 1-2", "  needle one", "  needle new"]))]
     it "rg -n piped into wc -l keeps the plain diff" $ withData "needle one\nneedle two\n" $ \d f -> do
       rs <- run d [bashLine "a" ("rg -n needle " <> cs f <> " | wc -l") (Just ["3"])]
       verdicts rs `shouldBe` [("a", VFalse (Mismatch ["3"] ["2"]))]
@@ -365,7 +365,7 @@ spec = describe "expacc replayable explore claims" $ do
       msg `shouldSatisfy` T.isInfixOf "    - 3:needle two"
       msg `shouldSatisfy` T.isInfixOf "    + 3:needle changed"
       rs <- checkClaims d [ClaimsName "r"]
-      verdicts rs `shouldBe` [("a", VFalse (RgMismatch ["line 1", "  needle one", "line 3", "  needle two"] ["line 1", "  needle one", "line 3", "  needle changed"])), ("b", VTrue)]
+      verdicts rs `shouldBe` [("a", VFalse (RgMismatch [] ["line 1", "  needle one", "line 3", "  needle two"] ["line 1", "  needle one", "line 3", "  needle changed"])), ("b", VTrue)]
       recordFix d (ClaimsName "r") "b" >>= (`shouldSatisfy` either (const False) (T.isPrefixOf "unchanged"))
     it "record-fix on an unknown id fails" $ withData $ \d f -> do
       Right _ <- recordNew d (ClaimsName "r") emptyHeader (nc "a" f)
@@ -454,7 +454,12 @@ spec = describe "expacc replayable explore claims" $ do
         `shouldBe` VFalse (Mismatch ["src/a.hs:1:x", "note"] ["src/a.hs:2:x", "note"])
     it "a file rename is not a shift" $
       compareOutput "rg -n x src" ["src/a.hs:1:x"] ["src/b.hs:1:x"]
-        `shouldBe` VFalse (RgMismatch ["src/a.hs:1", "  x"] ["src/b.hs:1", "  x"])
+        `shouldBe` VFalse (RgMismatch [] ["src/a.hs:1", "  x"] ["src/b.hs:1", "  x"])
+    it "a shift plus a change reports the offset too" $ do
+      let v = compareOutput "rg -n x src" ["src/a.hs:1:x", "src/a.hs-2-old"] ["src/a.hs:4:x", "src/a.hs-5-new"]
+      v `shouldBe` VFalse (RgMismatch [("src/a.hs:1-2", "src/a.hs:4-5", 3)] ["src/a.hs:1-2", "  x", "  old"] ["src/a.hs:4-5", "  x", "  new"])
+      renderResults PrintFalse [ClaimResult (ClaimsName "f") (ClaimId "c") "t" Target v Nothing Nothing]
+        `shouldSatisfy` T.isInfixOf "output differs, line numbers also moved by +3"
 
   describe "resolveExploreDir" $
     it "honours EXPACC_DIR and falls back to default" $ do

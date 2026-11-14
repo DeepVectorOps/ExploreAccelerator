@@ -32,7 +32,7 @@ data Reason
     Shifted [(Text, Text, Int)]
   | -- | rg -n output that changed: expected and actual grouped into blocks
     -- (see "Claims.RgGroup"), so the diff shows headers and changed lines.
-    RgMismatch [(Text, Text, Int)] [Text] [Text]
+    RgMismatch [Text] [Text]
   | NotRecorded
   | Rejected Text
   | ExecFailed Text
@@ -95,8 +95,7 @@ renderResults mode rs = T.unlines (intercalate [""] (map render (filter shown rs
       Just ls -> map ("output: " <>) ls
     reasonText origin = \case
       Mismatch {} -> "output differs"
-      RgMismatch [] _ _ -> "output differs"
-      RgMismatch moved _ _ -> "output differs, line numbers also moved " <> offsets moved
+      RgMismatch {} -> "output differs"
       Shifted moved -> "same lines, line numbers moved " <> offsets moved <> " (record-fix to update)"
       Reordered {} -> "same lines, different order (sort the output, e.g. rg --sort path)"
       NotRecorded -> "no expect recorded"
@@ -108,7 +107,7 @@ renderResults mode rs = T.unlines (intercalate [""] (map render (filter shown rs
       Lint t -> "lint: " <> t
     diffLines = \case
       Mismatch e a -> renderDiff e a
-      RgMismatch _ e a -> renderDiff e a
+      RgMismatch e a -> renderDiff e a
       Shifted moved -> concat [["    - " <> o, "    + " <> n] | (o, n, _) <- moved]
       Reordered e a -> map (("    - " <>)) e <> map (("    + " <>)) a
       _ -> []

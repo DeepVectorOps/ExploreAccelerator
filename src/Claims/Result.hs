@@ -15,6 +15,7 @@ module Claims.Result
 import Claims.Name
 import Data.Algorithm.Diff (PolyDiff (..))
 import Data.Algorithm.DiffContext (Numbered (..), getContextDiff)
+import Data.Containers.ListUtils (nubOrd)
 import Data.List (intercalate)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
@@ -26,6 +27,12 @@ data Origin = Target | Dependency
 data Reason
   = Mismatch [Text] [Text]
   | Reordered [Text] [Text]
+  | -- | rg -n output whose blocks hold the same lines, only at other line
+    -- numbers: (expected header, actual header, offset) per moved block.
+    Shifted [(Text, Text, Int)]
+  | -- | rg -n output that changed: expected and actual grouped into blocks
+    -- (see "Claims.RgGroup"), so the diff shows headers and changed lines.
+    RgMismatch [Text] [Text]
   | NotRecorded
   | Rejected Text
   | ExecFailed Text
@@ -88,6 +95,8 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
       Just ls -> map ("output: " <>) ls
     reasonText origin = \case
       Mismatch {} -> "output differs"
+      RgMismatch {} -> "output differs"
+      Shifted moved -> "same lines, line numbers moved " <> offsets moved <> " (record-fix to update)"
       Reordered {} -> "same lines, different order (sort the output, e.g. rg --sort path)"
       NotRecorded -> "no expect recorded"
       Rejected t -> "rejected: " <> t
@@ -98,8 +107,18 @@ renderResults mode rs = T.unlines (concatMap render (filter shown rs) <> [summar
       Lint t -> "lint: " <> t
     diffLines = \case
       Mismatch e a -> renderDiff e a
+      RgMismatch e a -> renderDiff e a
+      Shifted moved -> concat [["    - " <> o, "    + " <> n] | (o, n, _) <- moved]
       Reordered e a -> map (("    - " <>)) e <> map (("    + " <>)) a
       _ -> []
+
+-- | @by +3@ when every block moved alike, else @(+3, -2)@.
+offsets :: [(Text, Text, Int)] -> Text
+offsets moved = case nubOrd [d | (_, _, d) <- moved] of
+  [d] -> "by " <> signed d
+  ds -> "(" <> T.intercalate ", " (map signed ds) <> ")"
+  where
+    signed d = (if d > 0 then "+" else "") <> cs (show d)
 
 -- | Diff rows with two unchanged lines of context around each change.
 renderDiff :: [Text] -> [Text] -> [Text]

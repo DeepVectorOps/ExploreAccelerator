@@ -48,6 +48,15 @@ command that ran and its stdout, prefixed `command:` and `output:`.
 `FALSE file#id` and the command that failed. Exit code:
 `0` all true, `1` any false, `2` bad usage.
 
+When the command runs `rg` with line numbers (`-n`, `--line-number`, `-nA5`,
+...) and every output line parses as rg's `path:N:text` / `path-N-text` /
+`N:text` / `--` format, lines are grouped into blocks of consecutive lines
+(`path:START-END` plus the text). If only the numbers changed, the claim is
+FALSE with `same lines, line numbers moved by +N (record-fix to update)` and
+the diff shows just the old and new headers; otherwise the diff is on the
+grouped blocks, so only headers and changed lines show as `-`/`+`. The
+recorded `expect` and the `output:` trace stay raw rg output.
+
 ```
 TRUE  auth-flow#login-handler  Login is handled in src/auth.js
 command: rg -n handleLogin src

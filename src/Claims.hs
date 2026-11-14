@@ -7,6 +7,7 @@ module Claims
   , module Claims.File
   , module Claims.Result
   , module Claims.Run
+  , module Claims.RgGroup
   , module Claims.Check
   ) where
 
@@ -15,4 +16,5 @@ import Claims.File
 import Claims.Name
 import Claims.Quote
 import Claims.Result
+import Claims.RgGroup
 import Claims.Run

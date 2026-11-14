@@ -119,13 +119,50 @@ spec = describe "expacc replayable explore claims" $ do
           cmd `shouldSatisfy` T.isInfixOf "rg"
           out `shouldBe` ["1:needle one", "3:needle two"]
         other -> expectationFailure (show other)
-    it "line-number drift in expect is a Mismatch" $ withData "needle one\nhay\n" $ \d f -> do
+    it "line-number drift in rg -n output is Shifted" $ withData "needle one\nhay\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["99:needle one"])]
+      verdicts rs `shouldBe` [("a", VFalse (Shifted [("line 99", "line 1", -98)]))]
+    it "line-number drift without rg -n is a Mismatch" $ withData "needle one\nhay\n" $ \d f -> do
+      rs <- run d [bashLine "a" ("grep -n needle " <> cs f) (Just ["99:needle one"])]
       verdicts rs `shouldBe` [("a", VFalse (Mismatch ["99:needle one"] ["1:needle one"]))]
-    it "content change is a Mismatch with diffs" $ withData "needle one\nneedle new\n" $ \d f -> do
+    it "content change in rg -n output diffs the grouped blocks" $ withData "needle one\nneedle new\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["1:needle one", "2:needle old"])]
       verdicts rs `shouldBe`
-        [("a", VFalse (Mismatch ["1:needle one", "2:needle old"] ["1:needle one", "2:needle new"]))]
+        [("a", VFalse (RgMismatch ["lines 1-2", "  needle one", "  needle old"] ["lines 1-2", "  needle one", "  needle new"]))]
+    it "rg -n piped into wc -l keeps the plain diff" $ withData "needle one\nneedle two\n" $ \d f -> do
+      rs <- run d [bashLine "a" ("rg -n needle " <> cs f <> " | wc -l") (Just ["3"])]
+      verdicts rs `shouldBe` [("a", VFalse (Mismatch ["3"] ["2"]))]
+    it "shifted context block across files with -A and -- separators" $ withTmp $ \d -> do
+      createDirectoryIfMissing True (d </> "src")
+      TIO.writeFile (d </> "src" </> "a.hs") "x\nx\nx\nloginFunction = 1\nctx1\nctx2\n"
+      TIO.writeFile (d </> "src" </> "b.hs") "loginFunction = 2\nb1\n"
+      let cmd = "cd " <> cs d <> " && rg --sort path -n -A2 loginFunction src"
+          ex = ["src/a.hs:1:loginFunction = 1", "src/a.hs-2-ctx1", "src/a.hs-3-ctx2", "--", "src/b.hs:1:loginFunction = 2", "src/b.hs-2-b1"]
+      rs <- run d [bashLine "a" cmd (Just ex)]
+      verdicts rs `shouldBe` [("a", VFalse (Shifted [("src/a.hs:1-3", "src/a.hs:4-6", 3)]))]
+      let txt = renderResults PrintFalse rs
+      txt `shouldSatisfy` T.isInfixOf "same lines, line numbers moved by +3 (record-fix to update)"
+      txt `shouldSatisfy` T.isInfixOf "    - src/a.hs:1-3\n    + src/a.hs:4-6\n"
+      txt `shouldSatisfy` (not . T.isInfixOf "    - src/b.hs")
+    it "shift plus one changed line shows only the header and that line" $ withTmp $ \d -> do
+      createDirectoryIfMissing True (d </> "src")
+      TIO.writeFile (d </> "src" </> "a.hs") "x\nx\nloginFunction = 1\nl2\nl3 changed\nl4\nl5\n"
+      let cmd = "cd " <> cs d <> " && rg --sort path -nA4 loginFunction src"
+          ex = ["src/a.hs:1:loginFunction = 1", "src/a.hs-2-l2", "src/a.hs-3-l3", "src/a.hs-4-l4", "src/a.hs-5-l5"]
+      rs <- run d [bashLine "a" cmd (Just ex)]
+      let txt = renderResults PrintFalse rs
+      txt `shouldSatisfy` T.isInfixOf "-- output differs"
+      txt `shouldSatisfy` T.isInfixOf "    - src/a.hs:1-5\n    + src/a.hs:3-7\n        loginFunction = 1\n        l2\n    -   l3\n    +   l3 changed\n"
+      length (filter ("    - " `T.isPrefixOf`) (T.lines txt)) `shouldBe` 2
+    it "a different total offset per block lists each offset" $ do
+      let v = compareOutput "rg -n x src"
+            ["src/a.hs:1:x", "src/b.hs:10:x"] ["src/a.hs:3:x", "src/b.hs:5:x"]
+      v `shouldBe` VFalse (Shifted [("src/a.hs:1", "src/a.hs:3", 2), ("src/b.hs:10", "src/b.hs:5", -5)])
+      renderResults PrintFalse [ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target v Nothing Nothing]
+        `shouldSatisfy` T.isInfixOf "line numbers moved (+2, -5)"
+    it "one rg line whose text holds :N: or -N- splits at the real path" $ do
+      fmap groupRg (parseRgOutput ["src/a.hs:9:x:12:y"]) `shouldBe` Just [Block (Just "src/a.hs") 9 9 ["x:12:y"]]
+      fmap groupRg (parseRgOutput ["src/a.hs-4-ctx -5- here"]) `shouldBe` Just [Block (Just "src/a.hs") 4 4 ["ctx -5- here"]]
     it "same lines in another order is Reordered" $ withData "needle one\nneedle two\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["2:needle two", "1:needle one"])]
       verdicts rs `shouldBe`
@@ -328,7 +365,7 @@ spec = describe "expacc replayable explore claims" $ do
       msg `shouldSatisfy` T.isInfixOf "    - 3:needle two"
       msg `shouldSatisfy` T.isInfixOf "    + 3:needle changed"
       rs <- checkClaims d [ClaimsName "r"]
-      verdicts rs `shouldBe` [("a", VFalse (Mismatch ["1:needle one", "3:needle two"] ["1:needle one", "3:needle changed"])), ("b", VTrue)]
+      verdicts rs `shouldBe` [("a", VFalse (RgMismatch ["line 1", "  needle one", "line 3", "  needle two"] ["line 1", "  needle one", "line 3", "  needle changed"])), ("b", VTrue)]
       recordFix d (ClaimsName "r") "b" >>= (`shouldSatisfy` either (const False) (T.isPrefixOf "unchanged"))
     it "record-fix on an unknown id fails" $ withData $ \d f -> do
       Right _ <- recordNew d (ClaimsName "r") emptyHeader (nc "a" f)
@@ -391,6 +428,33 @@ spec = describe "expacc replayable explore claims" $ do
           txt = renderResults PrintFalse [r]
       txt `shouldSatisfy` (not . T.isInfixOf "command:")
       txt `shouldSatisfy` (not . T.isInfixOf "output:")
+
+  describe "rg -n grouping" $ do
+    it "detects rg with a line-number flag" $ do
+      mapM_ ((`shouldBe` True) . mentionsRgLineNumbers)
+        ["rg -n x src", "rg --sort path --line-number x", "rg -nA5 x", "rg -in x", "cd d && rg -C2 -n x | head"]
+      mapM_ ((`shouldBe` False) . mentionsRgLineNumbers)
+        ["rg x src", "grep -n x src", "rg -A5 x", "rg --no-line-number x", "rgx -n y"]
+    it "parses paths with dashes and digits" $ do
+      let ls = ["2024-notes-v2/a-1-b.md:3:hit", "2024-notes-v2/a-1-b.md-4-ctx -5- here", "--", "2024-notes-v2/a-1-b.md:9:x:12:y"]
+      fmap groupRg (parseRgOutput ls) `shouldBe` Just
+        [ Block (Just "2024-notes-v2/a-1-b.md") 3 4 ["hit", "ctx -5- here"]
+        , Block (Just "2024-notes-v2/a-1-b.md") 9 9 ["x:12:y"]
+        ]
+    it "parses the single-file N:text / N-text form" $ do
+      let ls = ["12:foo.bar:3:x", "13-ctx-1-y", "--", "20:z"]
+      fmap groupRg (parseRgOutput ls) `shouldBe` Just
+        [Block Nothing 12 13 ["foo.bar:3:x", "ctx-1-y"], Block Nothing 20 20 ["z"]]
+      fmap (renderBlocks . groupRg) (parseRgOutput ls) `shouldBe`
+        Just ["lines 12-13", "  foo.bar:3:x", "  ctx-1-y", "line 20", "  z"]
+    it "rejects output with a line that is not rg format" $
+      parseRgOutput ["src/a.hs:1:x", "total 3"] `shouldBe` Nothing
+    it "falls back to the plain diff when a line does not parse" $
+      compareOutput "rg -n x src" ["src/a.hs:1:x", "note"] ["src/a.hs:2:x", "note"]
+        `shouldBe` VFalse (Mismatch ["src/a.hs:1:x", "note"] ["src/a.hs:2:x", "note"])
+    it "a file rename is not a shift" $
+      compareOutput "rg -n x src" ["src/a.hs:1:x"] ["src/b.hs:1:x"]
+        `shouldBe` VFalse (RgMismatch ["src/a.hs:1", "  x"] ["src/b.hs:1", "  x"])
 
   describe "resolveExploreDir" $
     it "honours EXPACC_DIR and falls back to default" $ do

@@ -3,11 +3,13 @@ module Claims.Check
   ( resolveExploreDir
   , checkClaims
   , lintFile
+  , compareOutput
   ) where
 
 import Claims.File
 import Claims.Name
 import Claims.Result
+import Claims.RgGroup
 import Claims.Run (runCmd)
 import Control.Monad (forM_, unless, when)
 import Data.Bifunctor (first)
@@ -33,12 +35,27 @@ verdictFor c = case claimExpect c of
   Just ex ->
     runCmd (claimCmd c) >>= \case
       Left r -> pure (VFalse r, Just (claimCmd c), Nothing)
-      Right out -> pure (compareLines ex out, Just (claimCmd c), Just out)
+      Right out -> pure (compareOutput (claimCmd c) ex out, Just (claimCmd c), Just out)
+
+-- | Verdict for a command's expected and actual stdout lines. For @rg -n@
+-- output (every line parses as rg's format) the lines are grouped into
+-- blocks, so moved lines are 'Shifted' and a change diffs block-wise.
+compareOutput :: Text -> [Text] -> [Text] -> Verdict
+compareOutput cmd e a
+  | e == a = VTrue
+  | sort e == sort a = VFalse (Reordered e a)
+  | Just be <- grouped e
+  , Just ba <- grouped a =
+      let moved = [(blockHeader x, blockHeader y, bStart y - bStart x) | (x, y) <- zip be ba, bStart x /= bStart y]
+       in if map content be == map content ba && not (null moved)
+            then VFalse (Shifted moved)
+            else VFalse (RgMismatch (renderBlocks be) (renderBlocks ba))
+  | otherwise = VFalse (Mismatch e a)
   where
-    compareLines e a
-      | e == a = VTrue
-      | sort e == sort a = VFalse (Reordered e a)
-      | otherwise = VFalse (Mismatch e a)
+    grouped ls
+      | mentionsRgLineNumbers cmd = groupRg <$> parseRgOutput ls
+      | otherwise = Nothing
+    content b = (bFile b, bBody b)
 
 -- | Reads @$EXPACC_DIR/claims/NAME.claims.jsonl@. NAME is a slug; there is
 -- no doc-header lookup and no path acceptance.

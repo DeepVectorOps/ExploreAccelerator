@@ -17,6 +17,7 @@ library
       Claims.Name
       Claims.Quote
       Claims.Result
+      Claims.RgGroup
       Claims.Run
       Prune
       Record

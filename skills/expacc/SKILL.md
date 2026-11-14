@@ -69,7 +69,7 @@ expacc lint NAME...
 
 ### Why a claim is FALSE
 
-- `output differs`: the diff shows expected against actual. `output differs, line numbers also moved by +3` means the content changed and the block moved too.
+- `output differs`: the diff shows expected against actual.
   For `rg -n` output the diff is on blocks: a `path:START-END` header, then the lines indented, so a move shows as a changed header and only edited lines show as `-`/`+`.
 - `same lines, line numbers moved by +N (record-fix to update)`: an `rg -n` claim whose lines are unchanged but moved in the file. The diff shows only the old and new block headers. If the claim text or your note cites those line numbers, fix them; then `record-fix` the claim.
 - `same lines, different order`: an `rg` in the command has no `--sort path`. Add it to every `rg`, edit `cmd` in your own claims file, then `record-fix` the claim.

@@ -19,6 +19,7 @@ library
       Claims.Result
       Claims.RgGroup
       Claims.Run
+      Claims.SedRange
       Prune
       Record
   other-modules:

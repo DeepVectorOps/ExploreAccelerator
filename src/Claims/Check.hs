@@ -2,6 +2,8 @@
 module Claims.Check
   ( resolveExploreDir
   , checkClaims
+  , replayClaim
+  , listClaimsNames
   , lintFile
   , compareOutput
   ) where
@@ -11,6 +13,7 @@ import Claims.Name
 import Claims.Result
 import Claims.RgGroup
 import Claims.Run (runCmd)
+import Claims.SedRange (sedShift)
 import Control.Monad (forM_, unless, when)
 import Data.Bifunctor (first)
 import qualified Data.ByteString as BS
@@ -28,14 +31,22 @@ import System.FilePath (takeFileName, (</>))
 resolveExploreDir :: IO FilePath
 resolveExploreDir = fromMaybe "./live-docs/explore" <$> lookupEnv "EXPACC_DIR"
 
--- | Verdict, the command if it was run, and its stdout if the run finished.
-verdictFor :: Claim -> IO (Verdict, Maybe Text, Maybe [Text])
-verdictFor c = case claimExpect c of
-  Nothing -> pure (VFalse NotRecorded, Nothing, Nothing)
+-- | Verdict, the command if it was run, its stdout if the run finished, and
+-- for a 'Shifted' claim the claim as it reads at the new line numbers: a new
+-- @expect@ for @rg -n@, a new range in @cmd@ for @sed -n@.
+replayClaim :: Claim -> IO (Verdict, Maybe Text, Maybe [Text], Maybe Claim)
+replayClaim c = case claimExpect c of
+  Nothing -> pure (VFalse NotRecorded, Nothing, Nothing, Nothing)
   Just ex ->
     runCmd (claimCmd c) >>= \case
-      Left r -> pure (VFalse r, Just (claimCmd c), Nothing)
-      Right out -> pure (compareOutput (claimCmd c) ex out, Just (claimCmd c), Just out)
+      Left r -> pure (VFalse r, Just (claimCmd c), Nothing, Nothing)
+      Right out -> do
+        moved <- if ex == out then pure Nothing else sedShift (claimCmd c) ex
+        let (v, fixed) = case (moved, compareOutput (claimCmd c) ex out) of
+              (Just (m, cmd), _) -> (VFalse (Shifted [m]), Just c {claimCmd = cmd})
+              (Nothing, v'@(VFalse (Shifted _))) -> (v', Just c {claimExpect = Just out})
+              (Nothing, v') -> (v', Nothing)
+        pure (v, Just (claimCmd c), Just out, fixed)
 
 -- | Verdict for a command's expected and actual stdout lines. For @rg -n@
 -- output (every line parses as rg's format) the lines are grouped into
@@ -74,9 +85,13 @@ listClaimsFiles dir = do
     False -> pure []
     True -> map (cdir </>) . sort . filter (".claims.jsonl" `isSuffixOf`) <$> listDirectory cdir
 
+-- | The name of every claims file in @claims/@, sorted.
+listClaimsNames :: FilePath -> IO [ClaimsName]
+listClaimsNames dir = map (ClaimsName . T.dropEnd (T.length ".claims.jsonl") . cs . takeFileName) <$> listClaimsFiles dir
+
 notFound :: FilePath -> ClaimsName -> IO Text
 notFound dir name = do
-  have <- map (T.dropEnd (T.length ".claims.jsonl") . cs . takeFileName) <$> listClaimsFiles dir
+  have <- map (\(ClaimsName n) -> n) <$> listClaimsNames dir
   let avail
         | null have = "none"
         | otherwise = T.intercalate ", " (take 10 have) <> (if length have > 10 then ", ..." else "")
@@ -104,7 +119,7 @@ visit env origin only name =
       let picked = [c | c <- cfClaims cf, maybe True (== claimId c) only]
       when (null picked) $ forM_ only $ \i -> emit i "" (VFalse (MissingDep "no such claim")) Nothing Nothing
       forM_ picked $ \c -> once (envClaims env) (name, claimId c) $
-        verdictFor c >>= \(v, cmd, out) -> emit (claimId c) (claimText c) v cmd out
+        replayClaim c >>= \(v, cmd, out, _) -> emit (claimId c) (claimText c) v cmd out
       once (envFiles env) name $ do
         forM_ (cfProblems cf) $ \p -> emit (ClaimId "lint") "" (VFalse (Lint p)) Nothing Nothing
         forM_ (hDepends (cfHeader cf)) $ \case

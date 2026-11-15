@@ -141,7 +141,7 @@ spec = describe "expacc replayable explore claims" $ do
       rs <- run d [bashLine "a" cmd (Just ex)]
       verdicts rs `shouldBe` [("a", VFalse (Shifted [("src/a.hs:1-3", "src/a.hs:4-6", 3)]))]
       let txt = renderResults PrintFalse rs
-      txt `shouldSatisfy` T.isInfixOf "same lines, line numbers moved by +3 (record-fix to update)"
+      txt `shouldSatisfy` T.isInfixOf "same lines, line numbers moved by +3 (fix-line-shift to update)"
       txt `shouldSatisfy` T.isInfixOf "    - src/a.hs:1-3\n    + src/a.hs:4-6\n"
       txt `shouldSatisfy` (not . T.isInfixOf "    - src/b.hs")
     it "shift plus one changed line shows only the header and that line" $ withTmp $ \d -> do
@@ -370,6 +370,65 @@ spec = describe "expacc replayable explore claims" $ do
     it "record-fix on an unknown id fails" $ withData $ \d f -> do
       Right _ <- recordNew d (ClaimsName "r") emptyHeader (nc "a" f)
       recordFix d (ClaimsName "r") "zzz" >>= (`shouldSatisfy` either (T.isInfixOf "no claim zzz") (const False))
+
+  describe "fix-line-shift" $ do
+    let withData act = withTmp $ \d -> do
+          let f = d </> "data.txt"
+          TIO.writeFile f "top\nneedle one\nhay\nneedle two\n"
+          act d f
+        sedLine i range f = bashLine i ("sed -n '" <> range <> "' " <> cs f)
+        stored d = do
+          Right cf <- parseClaimsFile "s" <$> TIO.readFile (d </> "claims" </> "s.claims.jsonl")
+          pure [(claimCmd c, claimExpect c) | c <- cfClaims cf]
+        fix dry d = fixLineShifts dry d (WholeFile (ClaimsName "s"))
+    it "a sed -n range whose lines moved is Shifted" $ withData $ \d f -> do
+      writeClaims d "s" [sedLine "a" "1,2p" f (Just ["needle one", "hay"])]
+      rs <- checkClaims d [ClaimsName "s"]
+      verdicts rs `shouldBe` [("a", VFalse (Shifted [(cs f <> ":1-2", cs f <> ":2-3", 1)]))]
+    it "sed -n lines that are gone, or found twice, are a Mismatch" $ withData $ \d f -> do
+      TIO.writeFile f "x\ndup\ndup\n"
+      writeClaims d "s" [sedLine "gone" "1p" f (Just ["needle one"]), sedLine "twice" "1p" f (Just ["dup"])]
+      rs <- checkClaims d [ClaimsName "s"]
+      verdicts rs `shouldBe` [("gone", VFalse (Mismatch ["needle one"] ["x"])), ("twice", VFalse (Mismatch ["dup"] ["x"]))]
+    it "parses only a whole sed -n range command" $ do
+      parseSedRange "sed -n '3,9p' src/a.hs" `shouldBe` Just (SedRange 3 9 "3,9p" "src/a.hs")
+      parseSedRange "sed -n 3p \"src/a.hs\"" `shouldBe` Just (SedRange 3 3 "3p" "src/a.hs")
+      parseSedRange "sed -n '3,9p' src/a.hs | wc -l" `shouldBe` Nothing
+      parseSedRange "sed -n '/x/p' src/a.hs" `shouldBe` Nothing
+    it "moves shifted rg and sed claims and leaves the rest alone" $ withData $ \d f -> do
+      let rgCmd = "rg -n needle " <> cs f
+          changed = bashLine "changed" rgCmd (Just ["2:needle one", "4:needle old"])
+      writeClaims d "s"
+        [ bashLine "rg" rgCmd (Just ["1:needle one", "3:needle two"])
+        , sedLine "sed" "1,2p" f (Just ["needle one", "hay"])
+        , sedLine "one" "3p" f (Just ["needle two"])
+        , changed
+        , bashLine "ok" ("wc -l < " <> cs f) (Just ["4"])
+        ]
+      before <- stored d
+      Right dry <- fix True d
+      length (sfShifted dry) `shouldBe` 3
+      stored d `shouldReturn` before
+      Right done <- fix False d
+      (sfTrue done, sfFalse done) `shouldBe` (1, 1)
+      sfShifted done `shouldBe` sfShifted dry
+      head (sfShifted done) `shouldBe` ["shifted s#rg  by +1", "    - line 1", "    + line 2", "    - line 3", "    + line 4"]
+      after <- stored d
+      take 3 after
+        `shouldBe` [ (rgCmd, Just ["2:needle one", "4:needle two"])
+                   , ("sed -n '2,3p' " <> cs f, Just ["needle one", "hay"])
+                   , ("sed -n '4p' " <> cs f, Just ["needle two"])
+                   ]
+      drop 3 after `shouldBe` drop 3 before
+      rs <- checkClaims d [ClaimsName "s"]
+      [i | (i, VTrue) <- verdicts rs] `shouldBe` ["rg", "sed", "one", "ok"]
+    it "takes one claim by id and fails on an unknown one" $ withData $ \d f -> do
+      writeClaims d "s" [sedLine "a" "1,2p" f (Just ["needle one", "hay"]), sedLine "b" "3p" f (Just ["needle two"])]
+      Right one <- fixLineShifts False d (OneClaim (ClaimsName "s") (ClaimId "b"))
+      length (sfShifted one) `shouldBe` 1
+      map fst <$> stored d `shouldReturn` ["sed -n '1,2p' " <> cs f, "sed -n '4p' " <> cs f]
+      fixLineShifts False d (OneClaim (ClaimsName "s") (ClaimId "zzz"))
+        >>= (`shouldSatisfy` either (T.isInfixOf "no claim zzz") (const False))
 
   describe "renderResults" $ do
     let t = ClaimResult (ClaimsName "f") (ClaimId "t1") "good" Target VTrue Nothing Nothing

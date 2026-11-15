@@ -8,6 +8,7 @@ module Claims
   , module Claims.Result
   , module Claims.Run
   , module Claims.RgGroup
+  , module Claims.SedRange
   , module Claims.Check
   ) where
 
@@ -18,3 +19,4 @@ import Claims.Quote
 import Claims.Result
 import Claims.RgGroup
 import Claims.Run
+import Claims.SedRange

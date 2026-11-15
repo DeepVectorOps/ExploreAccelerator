@@ -5,11 +5,13 @@ module Record
   , recordNew
   , recordAppend
   , recordFix
+  , ShiftFixes (..)
+  , fixLineShifts
   ) where
 
 import Claims
 import Control.Exception (IOException, bracket, catch, finally)
-import Control.Monad (unless, when)
+import Control.Monad (forM, forM_, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE, withExceptT)
 import Data.Aeson (encode)
@@ -139,3 +141,42 @@ recordFix dir name cid = runExceptT $ withClaimsLock dir name $ do
       save dir name (cfHeader cf) [if claimId c == ClaimId cid then new else c | c <- cfClaims cf]
       pure (T.unlines (("fixed " <> label name (ClaimId cid)) : renderDiff (expected old) (expected new)))
     else pure ("unchanged " <> label name (ClaimId cid) <> "\n")
+
+-- | Claims of one file whose lines only moved, and how the rest checked.
+data ShiftFixes = ShiftFixes
+  { sfShifted :: [[Text]]
+  , sfTrue :: Int
+  , sfFalse :: Int
+  }
+  deriving (Eq, Show)
+
+instance Semigroup ShiftFixes where
+  ShiftFixes a b c <> ShiftFixes a' b' c' = ShiftFixes (a <> a') (b + b') (c + c')
+
+instance Monoid ShiftFixes where
+  mempty = ShiftFixes [] 0 0
+
+-- | Replays the file's claims, or just one, and moves each 'Shifted' claim to
+-- its new line numbers. Nothing else is rewritten; a dry run writes nothing.
+fixLineShifts :: Bool -> FilePath -> DepRef -> IO (Either Text ShiftFixes)
+fixLineShifts dryRun dir ref = runExceptT $ withClaimsLock dir name $ do
+  cf <- load "" dir name
+  let picked c = maybe True (== claimId c) only
+  forM_ only $ \(ClaimId i) ->
+    unless (any picked (cfClaims cf)) $ throwE ("no claim " <> i <> " in " <> cs (claimsPath dir name))
+  replayed <- liftIO . forM (cfClaims cf) $ \c ->
+    if picked c then (\(v, _, _, fixed) -> (c, Just (v, fixed))) <$> replayClaim c else pure (c, Nothing)
+  let fixes = [(c, moved) | (_, Just (VFalse (Shifted moved), Just c)) <- replayed]
+      verdictsOf = [v | (_, Just (v, _)) <- replayed]
+  unless (dryRun || null fixes) $
+    save dir name (cfHeader cf) [case r of Just (_, Just fixed) -> fixed; _ -> c | (c, r) <- replayed]
+  pure
+    ShiftFixes
+      { sfShifted = [renderShifted (label name (claimId c)) moved | (c, moved) <- fixes]
+      , sfTrue = length (filter (== VTrue) verdictsOf)
+      , sfFalse = length verdictsOf - length (filter (== VTrue) verdictsOf) - length fixes
+      }
+  where
+    (name, only) = case ref of
+      WholeFile n -> (n, Nothing)
+      OneClaim n i -> (n, Just i)

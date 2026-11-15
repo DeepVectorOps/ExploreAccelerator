@@ -9,6 +9,7 @@ module Claims.Result
   , PrintMode (..)
   , allTrue
   , renderResults
+  , renderShifted
   , renderDiff
   ) where
 
@@ -96,7 +97,7 @@ renderResults mode rs = T.unlines (intercalate [""] (map render (filter shown rs
     reasonText origin = \case
       Mismatch {} -> "output differs"
       RgMismatch {} -> "output differs"
-      Shifted moved -> "same lines, line numbers moved " <> offsets moved <> " (record-fix to update)"
+      Shifted moved -> "same lines, line numbers moved " <> offsets moved <> " (fix-line-shift to update)"
       Reordered {} -> "same lines, different order (sort the output, e.g. rg --sort path)"
       NotRecorded -> "no expect recorded"
       Rejected t -> "rejected: " <> t
@@ -108,9 +109,16 @@ renderResults mode rs = T.unlines (intercalate [""] (map render (filter shown rs
     diffLines = \case
       Mismatch e a -> renderDiff e a
       RgMismatch e a -> renderDiff e a
-      Shifted moved -> concat [["    - " <> o, "    + " <> n] | (o, n, _) <- moved]
+      Shifted moved -> movedLines moved
       Reordered e a -> map (("    - " <>)) e <> map (("    + " <>)) a
       _ -> []
+
+-- | @shifted LABEL  by +3@, then the old and new header of each moved block.
+renderShifted :: Text -> [(Text, Text, Int)] -> [Text]
+renderShifted label moved = ("shifted " <> label <> "  " <> offsets moved) : movedLines moved
+
+movedLines :: [(Text, Text, Int)] -> [Text]
+movedLines moved = concat [["    - " <> o, "    + " <> n] | (o, n, _) <- moved]
 
 -- | @by +3@ when every block moved alike, else @(+3, -2)@.
 offsets :: [(Text, Text, Int)] -> Text

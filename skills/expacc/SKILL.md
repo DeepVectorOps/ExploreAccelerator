@@ -35,6 +35,18 @@ Optional first line, a header:
 
 A NAME is a slug: `other`, or `other#id` for one claim. It resolves to `claims/other.claims.jsonl`. A path, a `.claims.jsonl` suffix or a `.md` name is rejected (exit 2). If `rg -l` printed a path, strip the directory and the suffix.
 
+## Searching
+
+Claims files are JSONL, so statements and commands are easy to search: extract a field with `jq`, pipe it into `rg`.
+
+```
+jq -r '.cmd // empty' live-docs/explore/claims/*.claims.jsonl | rg PATTERN
+jq -r 'select(.id) | "\(input_filename)#\(.id)\t\(.text)\t\(.cmd)"' live-docs/explore/claims/*.claims.jsonl | rg PATTERN
+```
+
+- `// empty` and `select(.id)` skip the header line, which has no claim fields.
+- The second form prefixes each hit with `file#id`, so it traces back to a claim.
+
 ## Recording
 
 ```
@@ -67,11 +79,21 @@ expacc lint NAME...
 - The last line is `OK: N true, 0 false` or `FAILED: N true, M false`. Exit code: `0` all true including dependencies, `1` any false, `2` bad usage.
 - `lint` reports file problems without running any command; `check` reports them too.
 
+### Fixing line shifts
+
+```
+expacc fix-line-shift [NAME...] [--dry-run]
+```
+
+- Updates every claim whose lines only moved in their file, and prints each old and new position. No NAME means every claims file; `--dry-run` writes nothing.
+- An `rg -n` claim gets a new `expect`. A `sed -n 'A,Bp' FILE` claim gets a new range in `cmd`; don't `record-fix` it, that would store other lines.
+- Claims that changed in content are left alone. See [keeping-live-docs-up-to-date.md](keeping-live-docs-up-to-date.md) for the whole routine.
+
 ### Why a claim is FALSE
 
 - `output differs`: the diff shows expected against actual.
   For `rg -n` output the diff is on blocks: a `path:START-END` header, then the lines indented, so a move shows as a changed header and only edited lines show as `-`/`+`.
-- `same lines, line numbers moved by +N (record-fix to update)`: an `rg -n` claim whose lines are unchanged but moved in the file. The diff shows only the old and new block headers. If the claim text or your note cites those line numbers, fix them; then `record-fix` the claim.
+- `same lines, line numbers moved by +N (fix-line-shift to update)`: the lines are unchanged but moved in the file. The diff shows only the old and new positions. Run `expacc fix-line-shift NAME`. If the claim text or your note cites those line numbers, fix them too. Detected for `rg -n` output and for a command that is just `sed -n 'A,Bp' FILE`.
 - `same lines, different order`: an `rg` in the command has no `--sort path`. Add it to every `rg`, edit `cmd` in your own claims file, then `record-fix` the claim.
 - `no expect recorded`: the claim has no `expect`.
 - `rejected`: empty command.
@@ -84,5 +106,5 @@ A FALSE claim matters only if what it states matters to your task.
 
 ## Rules
 
-- Write only your own claims file. Never edit another one; build on it with `depends`.
+- Write only your own claims file. Never edit another one; build on it with `depends`. The one exception is `fix-line-shift`, which may run on any claims file: it never changes what a claim states.
 - New evidence always goes through `record`, `record-append` or `record-fix`. Direct edits are for statements, commands and dependencies the CLI cannot change.

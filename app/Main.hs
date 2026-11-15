@@ -4,7 +4,8 @@ import Claims
 import Prune
 import Record
 import Control.Monad (unless)
-import Data.List (partition)
+import Data.Either (partitionEithers)
+import Data.List (intercalate, partition)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import Data.Time (getCurrentTime)
@@ -26,12 +27,15 @@ usage =
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
     , "       expacc record-append NAME --id ID --text TEXT -- CMD"
     , "       expacc record-fix NAME ID"
+    , "       expacc fix-line-shift [NAME...] [--dry-run]"
     , "       expacc prune [--dry-run] [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]"
     , "CMD is a bash string, run with bash -c; pipes and redirects work. Quote it as one argument."
     , "NAME is a slug (other, or other#id for one claim), resolved in $EXPACC_DIR/claims"
     , "(default ./live-docs/explore/claims). record runs CMD and stores its output as the"
     , "expected output; record creates the file, record-append adds a claim to it,"
     , "record-fix re-runs a claim and rewrites its expected output."
+    , "fix-line-shift updates the claims whose lines only moved in their file (rg -n output,"
+    , "sed -n 'A,Bp' FILE ranges) and prints what moved; no NAME means every claims file."
     , "prune deletes docs (and their claims) that are older than DUR (7d, 1h, 30m, 45s) AND"
     , "have a true-claim ratio below RATIO, or that have no claims file."
     , "--delete-if-older also filters --delete-if-missing-claim when both are given."
@@ -154,6 +158,18 @@ main = do
               n <- requireName name
               (if cmd == "record" then recordNew dir n (fHeader f) nc else recordAppend dir n nc) >>= finish
     ["record-fix", name, cid] -> requireName name >>= \n -> recordFix dir n cid >>= finish
+    "fix-line-shift" : rest
+      | (flags, names) <- partition ("--" `T.isPrefixOf`) rest
+      , all (== "--dry-run") flags -> do
+          requireExploreDir dir
+          refs <- if null names then map WholeFile <$> listClaimsNames dir else traverse (either usageError pure . parseDepRef) names
+          (errs, fixes) <- partitionEithers <$> mapM (fixLineShifts (not (null flags)) dir) refs
+          let ShiftFixes shifted true false = mconcat fixes
+              count = cs (show (length shifted)) <> " shifted claims " <> (if null flags then "fixed" else "would be fixed (dry run)")
+              summary = count <> ", " <> cs (show false) <> " still false, " <> cs (show true) <> " true"
+          TIO.putStr (T.unlines (intercalate [""] (shifted <> [[summary]])))
+          mapM_ (TIO.hPutStrLn stderr . ("expacc: " <>)) errs
+          unless (null errs) $ exitWith (ExitFailure 1)
     "prune" : flags@(_ : _) -> do
       o <- either usageError pure (parsePruneOpts flags)
       requireExploreDir dir

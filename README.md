@@ -21,6 +21,7 @@ expacc lint NAME...
 expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- 'CMD'
 expacc record-append NAME --id ID --text TEXT -- 'CMD'
 expacc record-fix NAME ID
+expacc fix-line-shift [NAME...] [--dry-run]
 expacc prune [--dry-run] [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]
 ```
 
@@ -52,10 +53,16 @@ When the command runs `rg` with line numbers (`-n`, `--line-number`, `-nA5`,
 ...) and every output line parses as rg's `path:N:text` / `path-N-text` /
 `N:text` / `--` format, lines are grouped into blocks of consecutive lines
 (`path:START-END` plus the text). If only the numbers changed, the claim is
-FALSE with `same lines, line numbers moved by +N (record-fix to update)` and
+FALSE with `same lines, line numbers moved by +N (fix-line-shift to update)` and
 the diff shows just the old and new headers; otherwise the diff is on the
 grouped blocks, so only headers and changed lines show as `-`/`+`. The
 recorded `expect` and the `output:` trace stay raw rg output.
+
+A command that is just `sed -n 'A,Bp' FILE` gets the same verdict when its
+expected lines sit, unchanged, at exactly one other place in the file.
+`expacc fix-line-shift` updates such claims (a new `expect` for rg, a new range
+in `cmd` for sed) and prints what moved; with no NAME it covers every claims
+file. See [skills/expacc/keeping-live-docs-up-to-date.md](skills/expacc/keeping-live-docs-up-to-date.md).
 
 ```
 TRUE  auth-flow#login-handler  Login is handled in src/auth.js

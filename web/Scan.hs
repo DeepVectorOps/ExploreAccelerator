@@ -12,7 +12,7 @@ import Control.Monad (foldM, forM)
 import Data.Aeson (object, (.=))
 import qualified Data.Aeson as A
 import qualified Data.ByteString as BS
-import Data.List (isPrefixOf, isSuffixOf, nub, sort)
+import Data.List (isPrefixOf, isSuffixOf, sort)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text.IO as TIO
@@ -53,11 +53,11 @@ scanOne rootText seen = case validAbsolute (cs rootText) of
         case got of
           Left ex -> pure ([missing rootText (cs (displayException ex))], seen)
           Right lives -> do
-            let fresh = filter (`notElem` seen) lives
+            (fresh, seen') <- selectFresh lives seen
             built <- try (mapM projectHit fresh) :: IO (Either IOException [A.Value])
             case built of
               Left ex -> pure ([missing rootText (cs (displayException ex))], seen)
-              Right cards -> pure (cards, seen ++ fresh)
+              Right cards -> pure (cards, seen')
 
 missing :: Text -> Text -> A.Value
 missing root err =
@@ -125,8 +125,7 @@ findLiveDocs root = do
   kids <- listKids root
   one <- concat <$> forM kids liveAt
   two <- concat <$> forM kids (\k -> listKids k >>= fmap concat . mapM liveAt)
-  canon <- mapM canonicalizePath (self ++ here ++ one ++ two)
-  pure (nub canon)
+  dedupPaths (self ++ here ++ one ++ two)
   where
     liveAt parent = do
       let p = parent </> "live-docs"
@@ -138,6 +137,25 @@ findLiveDocs root = do
           ok <- doesDirectoryExist p
           pure [p | ok]
       | otherwise = pure []
+
+-- | First discovered path wins. Canonical form is only the dedup key.
+-- A canonicalize failure keeps that path and does not fail the scan.
+dedupPaths :: [FilePath] -> IO [FilePath]
+dedupPaths ps = fst <$> selectFresh ps []
+
+selectFresh :: [FilePath] -> [FilePath] -> IO ([FilePath], [FilePath])
+selectFresh lives seen = foldM step ([], seen) lives
+  where
+    step (acc, keys) p = do
+      k <- canonKey p
+      if k `elem` keys
+        then pure (acc, keys)
+        else pure (acc ++ [p], keys ++ [k])
+
+canonKey :: FilePath -> IO FilePath
+canonKey p = do
+  got <- try (canonicalizePath p) :: IO (Either IOException FilePath)
+  pure $ either (const p) id got
 
 fmtTime :: UTCTime -> Text
 fmtTime = cs . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"

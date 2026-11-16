@@ -11,6 +11,7 @@ build-type:     Simple
 extra-source-files:
     web/static/app.css
     web/static/app.js
+    web/static/marked.min.js
 
 library
   exposed-modules:

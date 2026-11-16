@@ -12,7 +12,7 @@ import Control.Monad (foldM, forM)
 import Data.Aeson (object, (.=))
 import qualified Data.Aeson as A
 import qualified Data.ByteString as BS
-import Data.List (isPrefixOf, isSuffixOf, sort)
+import Data.List (isPrefixOf, isSuffixOf, nub, sort)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text.IO as TIO
@@ -27,7 +27,7 @@ import System.Directory
   , listDirectory
   , pathIsSymbolicLink
   )
-import System.FilePath (isAbsolute, splitDirectories, takeDirectory, (</>))
+import System.FilePath (isAbsolute, splitDirectories, takeDirectory, takeFileName, (</>))
 
 scanRoots :: [Text] -> IO A.Value
 scanRoots roots = do
@@ -120,16 +120,24 @@ listKids dir = do
 
 findLiveDocs :: FilePath -> IO [FilePath]
 findLiveDocs root = do
+  self <- selfLive root
   here <- liveAt root
   kids <- listKids root
   one <- concat <$> forM kids liveAt
   two <- concat <$> forM kids (\k -> listKids k >>= fmap concat . mapM liveAt)
-  pure (here ++ one ++ two)
+  canon <- mapM canonicalizePath (self ++ here ++ one ++ two)
+  pure (nub canon)
   where
     liveAt parent = do
       let p = parent </> "live-docs"
       ok <- doesDirectoryExist p
       pure [p | ok]
+    -- The added path may already be the live-docs tree, not a parent of one.
+    selfLive p
+      | takeFileName p == "live-docs" = do
+          ok <- doesDirectoryExist p
+          pure [p | ok]
+      | otherwise = pure []
 
 fmtTime :: UTCTime -> Text
 fmtTime = cs . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"

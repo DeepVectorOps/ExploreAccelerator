@@ -149,15 +149,6 @@ th {
   width: 11rem;
 }
 
-table.files th {
-  cursor: pointer;
-}
-
-table.projects tbody tr.pick,
-table.files tbody tr {
-  cursor: pointer;
-}
-
 tr.selected, tr.open {
   background: #243049;
 }
@@ -185,23 +176,63 @@ tr.selected, tr.open {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(16rem, 1fr) minmax(18rem, 1.4fr);
+  grid-template-columns: minmax(18rem, 0.9fr) minmax(22rem, 1.6fr);
   gap: .6rem;
 }
 
-.file-scroll, .viewer {
+.notes, .detail {
   min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-scroll {
+  flex: 1;
+  min-height: 8rem;
   overflow: auto;
 }
 
+table.notes-table th {
+  cursor: pointer;
+}
+
+table.projects tbody tr.pick,
+table.notes-table tbody tr {
+  cursor: pointer;
+}
+
+.orphans {
+  flex: 0 0 auto;
+  max-height: 8rem;
+  overflow: auto;
+  border-top: 1px solid #2c3142;
+  padding-top: .35rem;
+}
+
+.orphan {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: .15rem 0;
+  background: transparent;
+}
+
+.orphan.open {
+  background: #243049;
+}
+
 .viewer {
+  flex: 1;
+  min-height: 8rem;
+  overflow: auto;
   background: #181b24;
   border: 1px solid #2c3142;
   border-radius: 8px;
   padding: .5rem .7rem;
 }
 
-.claims {
+.note-claims {
   flex: 0 0 11rem;
   height: 11rem;
   max-height: 11rem;
@@ -222,12 +253,34 @@ pre {
   padding: .6rem;
   border-radius: 8px;
   overflow: auto;
-  max-height: 8rem;
 }
 
 .md {
   max-width: 48rem;
 }
+
+.md h1 { font-size: 1.45rem; margin: .8rem 0 .4rem; }
+.md h2 { font-size: 1.2rem; margin: .8rem 0 .35rem; }
+.md h3 { font-size: 1.05rem; margin: .7rem 0 .3rem; }
+.md p { margin: .4rem 0 .7rem; }
+.md ul, .md ol { margin: .3rem 0 .7rem; padding-left: 1.4rem; }
+.md code {
+  background: #0e1016;
+  padding: .05rem .25rem;
+  border-radius: 4px;
+}
+.md pre {
+  background: #0e1016;
+  padding: .6rem;
+  overflow: auto;
+}
+.md pre code {
+  background: transparent;
+  padding: 0;
+}
+.md a { color: #8eb6ff; }
+.md table { width: auto; margin: .4rem 0 .8rem; }
+.md th, .md td { border: 1px solid #2c3142; }
 
 .err {
   color: #ffb4b4;
@@ -238,6 +291,6 @@ pre {
 @media (max-width: 800px) {
   .split {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(8rem, 1fr) minmax(8rem, 1fr);
+    grid-template-rows: minmax(10rem, 0.8fr) minmax(12rem, 1.2fr);
   }
 }

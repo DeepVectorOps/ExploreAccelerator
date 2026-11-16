@@ -32,6 +32,9 @@ appCss = $(embedFile "web/static/app.css")
 appJs :: ByteString
 appJs = $(embedFile "web/static/app.js")
 
+markedJs :: ByteString
+markedJs = $(embedFile "web/static/marked.min.js")
+
 main :: IO ()
 main = do
   lock <- newMVar ()
@@ -182,7 +185,6 @@ page = doctypehtml_ $ do
     meta_ [charset_ "utf-8"]
     meta_ [name_ "viewport", content_ "width=device-width, initial-scale=1"]
     title_ "Live docs"
-    script_ [src_ "https://unpkg.com/marked/marked.min.js"] ("" :: Text)
     style_ (cs appCss :: Text)
   body_ $ do
     header_ [class_ "top"] $ do
@@ -196,4 +198,5 @@ page = doctypehtml_ $ do
       main_ [class_ "explorer"] $ do
         div_ [id_ "projects"] ""
         div_ [id_ "workspace"] ""
+    script_ (cs markedJs :: Text)
     script_ (cs appJs :: Text)

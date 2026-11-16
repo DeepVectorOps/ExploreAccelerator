@@ -5,6 +5,7 @@ synopsis: Replayable explore claims checker (expacc)
 extra-source-files:
 - web/static/app.css
 - web/static/app.js
+- web/static/marked.min.js
 
 language: GHC2021
 

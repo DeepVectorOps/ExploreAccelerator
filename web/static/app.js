@@ -12,8 +12,9 @@ let roots = load();
 let selectedRoot = null;
 let lastProjects = [];
 let lastDef = null;
-let openRel = null;
-let fileSort = {key: 'name', dir: 1};
+let openSlug = null;
+let openKind = null;
+let noteSort = {key: 'note', dir: 1};
 const $ = id => document.getElementById(id);
 
 function human(n) {
@@ -62,6 +63,35 @@ function modifiedCell(iso) {
   return el;
 }
 
+function noteSlug(rel) {
+  if (typeof rel !== 'string' || !rel.startsWith('explore/')) return null;
+  const name = rel.slice('explore/'.length);
+  if (!name || name.includes('/') || !name.endsWith('.md') || name === '.md') return null;
+  return name.slice(0, -'.md'.length);
+}
+
+function claimsByName(p) {
+  const m = new Map();
+  (p.claims || []).forEach(c => {
+    if (c && typeof c.name === 'string') m.set(c.name, c);
+  });
+  return m;
+}
+
+function noteRows(p) {
+  const byName = claimsByName(p);
+  return (p.files || []).flatMap(f => {
+    const slug = noteSlug(f.rel);
+    if (!slug) return [];
+    return [{slug, rel: f.rel, bytes: f.bytes, modified: f.modified, claims: byName.get(slug) || null}];
+  });
+}
+
+function orphanClaims(p, notes) {
+  const slugs = new Set(notes.map(n => n.slug));
+  return (p.claims || []).filter(c => c && typeof c.name === 'string' && !slugs.has(c.name));
+}
+
 function renderRoots() {
   const ul = $('root-list');
   ul.replaceChildren();
@@ -98,8 +128,9 @@ async function scan() {
   const projects = data.projects || [];
   const found = projects.filter(p => p.found);
   if (!(selectedRoot && found.some(p => p.root === selectedRoot))) {
-    openRel = null;
-    fileSort = {key: 'name', dir: 1};
+    openSlug = null;
+    openKind = null;
+    noteSort = {key: 'note', dir: 1};
     selectedRoot = found.length === 1 ? found[0].root : null;
   }
   lastProjects = projects;
@@ -142,8 +173,9 @@ function projectRow(p) {
   tr.classList.add('pick');
   tr.addEventListener('click', () => {
     if (selectedRoot !== p.root) {
-      openRel = null;
-      fileSort = {key: 'name', dir: 1};
+      openSlug = null;
+      openKind = null;
+      noteSort = {key: 'note', dir: 1};
     }
     selectedRoot = p.root;
     renderProjects(lastProjects, lastDef);
@@ -161,8 +193,20 @@ function renderWorkspace(p, def) {
     box.append(empty);
     return;
   }
-  if (openRel && !(p.files || []).some(f => f.rel === openRel)) openRel = null;
-  box.append(workspaceBar(p, def), fileSplit(p), claimPane(p));
+  const notes = sortNotes(noteRows(p));
+  const orphans = orphanClaims(p, notes);
+  const stillNote = openKind === 'note' && notes.some(n => n.slug === openSlug);
+  const stillOrphan = openKind === 'orphan' && orphans.some(c => c.name === openSlug);
+  if (!stillNote && !stillOrphan) {
+    if (notes.length) {
+      openSlug = notes[0].slug;
+      openKind = 'note';
+    } else {
+      openSlug = null;
+      openKind = null;
+    }
+  }
+  box.append(workspaceBar(p, def), workspaceSplit(p, notes, orphans));
 }
 
 function workspaceBar(p, def) {
@@ -245,123 +289,177 @@ function workspaceBar(p, def) {
   return wrap;
 }
 
-function sortFiles(files) {
-  const dir = fileSort.dir;
-  const key = fileSort.key;
-  return files.slice().sort((a, b) => {
+function sortNotes(notes) {
+  const dir = noteSort.dir;
+  const key = noteSort.key;
+  return notes.slice().sort((a, b) => {
     let c = 0;
     if (key === 'size') c = (Number(a.bytes) || 0) - (Number(b.bytes) || 0);
     else if (key === 'modified') c = String(a.modified || '').localeCompare(String(b.modified || ''));
-    else c = String(a.rel || '').localeCompare(String(b.rel || ''));
+    else if (key === 'claims') c = String(a.claims ? a.slug + '.claims.jsonl' : '').localeCompare(String(b.claims ? b.slug + '.claims.jsonl' : ''));
+    else c = String(a.slug || '').localeCompare(String(b.slug || ''));
+    if (c === 0) c = String(a.slug || '').localeCompare(String(b.slug || ''));
     return c * dir;
   });
 }
 
-function fileSplit(p) {
+function workspaceSplit(p, notes, orphans) {
   const split = document.createElement('div');
   split.className = 'split';
+  split.append(notesPane(p, notes, orphans), detailPane(p, notes, orphans));
+  return split;
+}
+
+function notesPane(p, notes, orphans) {
+  const pane = document.createElement('div');
+  pane.className = 'notes';
   const scroll = document.createElement('div');
-  scroll.className = 'file-scroll';
+  scroll.className = 'note-scroll';
   const table = document.createElement('table');
-  table.className = 'files';
+  table.className = 'notes-table';
   const head = document.createElement('thead');
   const hr = document.createElement('tr');
-  const nameTh = th('Name');
-  const sizeTh = th('Size', 'num size');
-  const modTh = th('Modified', 'num modified');
-  const bindSort = (el, key) => {
+  const cols = [
+    ['Note', 'note', ''],
+    ['Size', 'size', 'num size'],
+    ['Modified', 'modified', 'num modified'],
+    ['Claims file', 'claims', '']
+  ];
+  cols.forEach(([label, key, className]) => {
+    const el = th(label, className);
     el.addEventListener('click', () => {
-      if (fileSort.key === key) fileSort.dir = -fileSort.dir;
-      else fileSort = {key, dir: 1};
+      if (noteSort.key === key) noteSort.dir = -noteSort.dir;
+      else noteSort = {key, dir: 1};
       renderWorkspace(p, lastDef);
     });
-  };
-  bindSort(nameTh, 'name');
-  bindSort(sizeTh, 'size');
-  bindSort(modTh, 'modified');
-  hr.append(nameTh, sizeTh, modTh);
+    hr.append(el);
+  });
   head.append(hr);
   const body = document.createElement('tbody');
-  const viewer = document.createElement('div');
-  viewer.className = 'viewer';
-  sortFiles(p.files || []).forEach(f => {
+  notes.forEach(n => {
     const tr = document.createElement('tr');
-    tr.append(td(f.rel), td(human(f.bytes), 'num size'), modifiedCell(f.modified));
-    if (f.rel === openRel) tr.classList.add('open');
-    tr.addEventListener('click', () => openFile(p, f, viewer, tr));
+    const noteCell = td(n.slug);
+    noteCell.title = n.rel;
+    const claimsCell = td(n.claims ? n.slug + '.claims.jsonl' : '');
+    tr.append(noteCell, td(human(n.bytes), 'num size'), modifiedCell(n.modified), claimsCell);
+    if (openKind === 'note' && openSlug === n.slug) tr.classList.add('open');
+    tr.addEventListener('click', () => {
+      openSlug = n.slug;
+      openKind = 'note';
+      renderWorkspace(p, lastDef);
+    });
     body.append(tr);
   });
   table.append(head, body);
   scroll.append(table);
-  if (!openRel) {
-    const empty = document.createElement('p');
-    empty.className = 'meta';
-    empty.textContent = 'Select a file.';
-    viewer.append(empty);
+  pane.append(scroll);
+  if (orphans.length) {
+    const sec = document.createElement('section');
+    sec.className = 'orphans';
+    const h = document.createElement('p');
+    h.className = 'label';
+    h.textContent = 'Claims with no note';
+    sec.append(h);
+    orphans.forEach(c => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'orphan';
+      if (openKind === 'orphan' && openSlug === c.name) row.classList.add('open');
+      row.textContent = c.name + '.claims.jsonl';
+      row.addEventListener('click', () => {
+        openSlug = c.name;
+        openKind = 'orphan';
+        renderWorkspace(p, lastDef);
+      });
+      sec.append(row);
+    });
+    pane.append(sec);
   }
-  split.append(scroll, viewer);
-  if (openRel) {
-    const f = (p.files || []).find(x => x.rel === openRel);
-    const row = body.querySelector('tr.open');
-    if (f && row) openFile(p, f, viewer, row);
-  }
-  return split;
+  return pane;
 }
 
-async function openFile(p, f, view, row) {
-  openRel = f.rel;
-  row.parentElement.querySelectorAll('tr').forEach(tr => tr.classList.remove('open'));
-  row.classList.add('open');
-  view.replaceChildren();
-  const path = document.createElement('p');
-  path.className = 'path';
-  path.textContent = f.rel;
-  view.append(path);
-  const res = await fetch('/api/file?root=' + encodeURIComponent(p.root) + '&rel=' + encodeURIComponent(f.rel));
-  if (!res.ok) {
-    const data = await res.json();
-    const e = document.createElement('p');
-    e.className = 'err';
-    e.textContent = data.error || 'read failed';
-    view.append(e);
-    return;
-  }
-  const text = await res.text();
-  if (f.markdown && window.marked && typeof marked.parse === 'function') {
-    const d = document.createElement('div');
-    d.className = 'md';
-    d.innerHTML = marked.parse(text);
-    view.append(d);
+function detailPane(p, notes, orphans) {
+  const detail = document.createElement('div');
+  detail.className = 'detail';
+  const viewer = document.createElement('div');
+  viewer.className = 'viewer';
+  const claims = document.createElement('div');
+  claims.className = 'note-claims';
+  detail.append(viewer, claims);
+  if (openKind === 'note') {
+    const note = notes.find(n => n.slug === openSlug);
+    if (note) fillNote(p, note, viewer, claims);
+    else viewer.append(viewerMsg('Select a note.'));
+  } else if (openKind === 'orphan') {
+    const claim = orphans.find(c => c.name === openSlug);
+    viewer.append(viewerMsg('No note for this claims file.'));
+    if (claim) fillClaims(p, claim, claims);
   } else {
-    const pre = document.createElement('pre');
-    pre.textContent = text;
-    view.append(pre);
+    viewer.append(viewerMsg('Select a note.'));
   }
+  return detail;
 }
 
-function claimPane(p) {
-  const pane = document.createElement('div');
-  pane.className = 'claims';
+function viewerMsg(text) {
+  const empty = document.createElement('p');
+  empty.className = 'meta';
+  empty.textContent = text;
+  return empty;
+}
+
+function fillNote(p, note, viewer, claims) {
+  const title = document.createElement('p');
+  title.className = 'path';
+  title.textContent = note.slug;
+  viewer.append(title);
+  const body = document.createElement('div');
+  body.className = 'md';
+  viewer.append(body);
+  fetch('/api/file?root=' + encodeURIComponent(p.root) + '&rel=' + encodeURIComponent(note.rel))
+    .then(async res => {
+      if (!res.ok) {
+        const data = await res.json();
+        body.replaceWith(errLine(data.error || 'read failed'));
+        return;
+      }
+      const text = await res.text();
+      body.innerHTML = marked.parse(text);
+    })
+    .catch(() => {
+      body.replaceWith(errLine('read failed'));
+    });
+  if (note.claims) fillClaims(p, note.claims, claims);
+  else claims.append(viewerMsg('No claims file for this note.'));
+}
+
+function errLine(text) {
+  const e = document.createElement('p');
+  e.className = 'err';
+  e.textContent = text;
+  return e;
+}
+
+function fillClaims(p, claimFile, pane) {
+  const heading = document.createElement('p');
+  heading.className = 'path';
+  heading.textContent = 'explore/claims/' + claimFile.name + '.claims.jsonl';
   const table = document.createElement('table');
   const head = document.createElement('thead');
   const hr = document.createElement('tr');
-  hr.append(th('Run'), th('Claim'), th('Text'));
+  hr.append(th('Run'), th('Id'), th('Text'));
   head.append(hr);
   const body = document.createElement('tbody');
   const pre = document.createElement('pre');
   pre.className = 'check';
-  (p.claims || []).forEach(c => {
-    body.append(claimRow(p, c.name, c.name, '', pre));
-    (c.claims || []).forEach(cl => {
-      body.append(claimRow(p, c.name + '#' + cl.id, cl.id, cl.text || '', pre));
-    });
+  body.append(claimRow(p, claimFile.name, claimFile.name, '', pre));
+  (claimFile.claims || []).forEach(cl => {
+    body.append(claimRow(p, claimFile.name + '#' + cl.id, cl.id, cl.text || '', pre));
   });
   table.append(head, body);
-  pane.append(table, pre);
-  return pane;
+  pane.append(heading, table, pre);
 }
 
-function claimRow(p, name, claim, text, pre) {
+function claimRow(p, name, id, text, pre) {
   const tr = document.createElement('tr');
   const runCell = document.createElement('td');
   const run = document.createElement('button');
@@ -369,7 +467,7 @@ function claimRow(p, name, claim, text, pre) {
   run.textContent = 'Run';
   run.addEventListener('click', () => runCheck(p, name, pre));
   runCell.append(run);
-  tr.append(runCell, td(claim), td(text));
+  tr.append(runCell, td(id), td(text));
   return tr;
 }
 

@@ -1,6 +1,9 @@
 body {
+  height: 100vh;
+  overflow: hidden;
   margin: 0;
-  padding: 1.25rem 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
   font-family: system-ui, sans-serif;
   background: #12141a;
   color: #e7e9ee;
@@ -9,22 +12,82 @@ body {
 
 h1 {
   font-weight: 560;
-  font-size: 1.45rem;
-  margin: 0 0 .75rem;
+  font-size: 1.15rem;
+  margin: 0;
+  white-space: nowrap;
 }
 
-.hint {
+.top {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .55rem .8rem;
+  border-bottom: 1px solid #2c3142;
+  flex: 0 0 auto;
+}
+
+.shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+}
+
+.side {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid #2c3142;
+  padding: .6rem .7rem;
+  background: #181b24;
+}
+
+.label {
+  margin: 0 0 .4rem;
   color: #a7adba;
-  font-size: .9rem;
-  margin: .2rem 0 .6rem;
-  max-width: 52rem;
+  font-size: .8rem;
+  font-weight: 560;
 }
 
-.row {
+.explorer {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: .4rem .7rem .5rem;
+}
+
+#projects {
+  flex: 0 0 auto;
+  max-height: 9rem;
+  overflow: auto;
+}
+
+#workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.row, .dir {
   display: flex;
   gap: .4rem;
   align-items: center;
-  flex-wrap: wrap;
+}
+
+.dir {
+  margin: .25rem 0;
+}
+
+.dir-path, .livedocs {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dir-path {
+  flex: 1;
 }
 
 input, select, button {
@@ -41,44 +104,56 @@ button {
 }
 
 #root-input {
-  min-width: 22rem;
+  min-width: 16rem;
   flex: 1;
 }
 
 ul {
   list-style: none;
   padding: 0;
-  margin: .4rem 0;
+  margin: 0;
 }
 
 table {
   border-collapse: collapse;
   width: 100%;
-  margin: .6rem 0;
 }
 
 th, td {
   text-align: left;
-  padding: .35rem .55rem;
+  padding: .3rem .5rem;
   border-bottom: 1px solid #2c3142;
   vertical-align: top;
 }
 
 th {
+  position: sticky;
+  top: 0;
+  background: #181b24;
   color: #a7adba;
   font-weight: 560;
   font-size: .85rem;
+  z-index: 1;
 }
 
 .num {
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .size {
   width: 6rem;
-  text-align: right;
 }
 
+.modified {
+  width: 11rem;
+}
+
+table.files th {
+  cursor: pointer;
+}
+
+table.projects tbody tr.pick,
 table.files tbody tr {
   cursor: pointer;
 }
@@ -87,39 +162,58 @@ tr.selected, tr.open {
   background: #243049;
 }
 
-.detail {
-  margin-top: .4rem;
+.ws-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  flex: 0 0 auto;
+  padding: .35rem 0;
 }
 
-.expiry {
-  margin: .8rem 0 .2rem;
+.livedocs {
+  flex: 1;
+  padding-top: .35rem;
+  color: #b7beca;
+  font-size: .9rem;
+}
+
+.expiry-wrap {
+  flex: 0 0 auto;
 }
 
 .split {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(16rem, 1fr) minmax(18rem, 2fr);
-  gap: 1rem;
-  align-items: start;
+  grid-template-columns: minmax(16rem, 1fr) minmax(18rem, 1.4fr);
+  gap: .6rem;
+}
+
+.file-scroll, .viewer {
+  min-height: 0;
+  overflow: auto;
 }
 
 .viewer {
-  min-height: 8rem;
   background: #181b24;
   border: 1px solid #2c3142;
-  border-radius: 10px;
-  padding: .6rem .8rem;
+  border-radius: 8px;
+  padding: .5rem .7rem;
 }
 
-.path {
-  margin: 0 0 .4rem;
-  color: #b7beca;
-  font-size: .9rem;
+.claims {
+  flex: 0 0 11rem;
+  height: 11rem;
+  max-height: 11rem;
+  overflow: auto;
+  margin-top: .4rem;
+  border-top: 1px solid #2c3142;
 }
 
-.meta {
+.path, .meta, .empty {
   color: #b7beca;
   font-size: .9rem;
-  margin: .15rem 0;
+  margin: .15rem 0 .4rem;
 }
 
 pre {
@@ -128,7 +222,7 @@ pre {
   padding: .6rem;
   border-radius: 8px;
   overflow: auto;
-  max-height: 22rem;
+  max-height: 8rem;
 }
 
 .md {
@@ -137,16 +231,13 @@ pre {
 
 .err {
   color: #ffb4b4;
-}
-
-caption {
-  text-align: left;
-  color: #a7adba;
-  margin-bottom: .4rem;
+  font-size: .85rem;
+  min-height: 1.1em;
 }
 
 @media (max-width: 800px) {
   .split {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(8rem, 1fr) minmax(8rem, 1fr);
   }
 }

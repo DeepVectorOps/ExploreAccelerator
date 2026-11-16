@@ -54,6 +54,7 @@ executables:
     - directory
     - filepath
     - text
+    - time
     - http-types
     - file-embed
     ghc-options:

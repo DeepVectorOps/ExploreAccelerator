@@ -16,12 +16,14 @@ import Data.List (isPrefixOf, isSuffixOf, sort)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text.IO as TIO
+import Data.Time (UTCTime, defaultTimeLocale, formatTime)
 import LiveDocs.Config
 import System.Directory
   ( canonicalizePath
   , doesDirectoryExist
   , doesFileExist
   , getFileSize
+  , getModificationTime
   , listDirectory
   , pathIsSymbolicLink
   )
@@ -70,7 +72,10 @@ missing root err =
 projectHit :: FilePath -> IO A.Value
 projectHit live = do
   files <- walkFiles live ""
-  let total = sum [b | (_, b, _) <- files]
+  let total = sum [b | (_, b, _, _) <- files]
+      newest = case [t | (_, _, _, t) <- files] of
+        [] -> Nothing
+        ts -> Just (fmtTime (maximum ts))
   life <- readExploreLifetime live
   claims <- readClaims (live </> "explore")
   let (set, secs, lifeErr) = case life of
@@ -84,10 +89,11 @@ projectHit live = do
       , "found" .= True
       , "fileCount" .= length files
       , "totalBytes" .= total
+      , "modified" .= newest
       , "lifetimeSeconds" .= secs
       , "lifetimeSet" .= set
       , "lifetimeError" .= lifeErr
-      , "files" .= [object ["rel" .= rel, "bytes" .= b, "markdown" .= md] | (rel, b, md) <- files]
+      , "files" .= [object ["rel" .= rel, "bytes" .= b, "markdown" .= md, "modified" .= fmtTime t] | (rel, b, md, t) <- files]
       , "claims" .= claims
       ]
 
@@ -125,7 +131,10 @@ findLiveDocs root = do
       ok <- doesDirectoryExist p
       pure [p | ok]
 
-walkFiles :: FilePath -> FilePath -> IO [(Text, Integer, Bool)]
+fmtTime :: UTCTime -> Text
+fmtTime = cs . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
+
+walkFiles :: FilePath -> FilePath -> IO [(Text, Integer, Bool, UTCTime)]
 walkFiles dir rel = do
   names <- listDirectory dir
   rows <- fmap concat $ forM names $ \n -> do
@@ -144,7 +153,8 @@ walkFiles dir rel = do
               then pure []
               else do
                 sz <- getFileSize p
-                pure [(cs r, sz, ".md" `isSuffixOf` n)]
+                mt <- getModificationTime p
+                pure [(cs r, sz, ".md" `isSuffixOf` n, mt)]
   pure (sort rows)
 
 readClaims :: FilePath -> IO [A.Value]

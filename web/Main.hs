@@ -185,12 +185,15 @@ page = doctypehtml_ $ do
     script_ [src_ "https://unpkg.com/marked/marked.min.js"] ("" :: Text)
     style_ (cs appCss :: Text)
   body_ $ do
-    h1_ "Live docs"
-    section_ [class_ "roots"] $ do
-      p_ [class_ "hint"] "Add a project directory. Saved in this browser only."
-      div_ [class_ "row"] $ do
-        input_ [id_ "root-input", type_ "text", placeholder_ "/absolute/path"]
-        button_ [id_ "add-root", type_ "button"] "Add"
-      ul_ [id_ "root-list"] ""
-    div_ [id_ "projects"] ""
+    header_ [class_ "top"] $ do
+      h1_ "Live docs"
+      input_ [id_ "root-input", type_ "text", placeholder_ "/absolute/path"]
+      button_ [id_ "add-root", type_ "button"] "Add"
+    div_ [class_ "shell"] $ do
+      aside_ [class_ "side"] $ do
+        p_ [class_ "label"] "Directories"
+        ul_ [id_ "root-list"] ""
+      main_ [class_ "explorer"] $ do
+        div_ [id_ "projects"] ""
+        div_ [id_ "workspace"] ""
     script_ (cs appJs :: Text)

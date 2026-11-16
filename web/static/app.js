@@ -12,6 +12,8 @@ let roots = load();
 let selectedRoot = null;
 let lastProjects = [];
 let lastDef = null;
+let openRel = null;
+let fileSort = {key: 'name', dir: 1};
 const $ = id => document.getElementById(id);
 
 function human(n) {
@@ -35,6 +37,11 @@ function expiryText(p) {
   return p.lifetimeSeconds + ' seconds (' + daysLabel(p.lifetimeSeconds) + ' days)';
 }
 
+function shortTime(iso) {
+  if (typeof iso !== 'string' || !iso) return '';
+  return iso.slice(0, 16).replace('T', ' ');
+}
+
 function th(text, className) {
   const el = document.createElement('th');
   el.textContent = text;
@@ -49,27 +56,10 @@ function td(text, className) {
   return el;
 }
 
-function projectsEls() {
-  let table = $('projects');
-  let detail = $('project-detail');
-  if (!table || table.tagName !== 'TABLE') {
-    const next = document.createElement('table');
-    next.id = 'projects';
-    next.className = 'projects';
-    detail = document.createElement('div');
-    detail.id = 'project-detail';
-    detail.className = 'detail';
-    if (table) table.replaceWith(next, detail);
-    else document.body.append(next, detail);
-    table = next;
-  } else if (!detail) {
-    detail = document.createElement('div');
-    detail.id = 'project-detail';
-    detail.className = 'detail';
-    table.after(detail);
-  }
-  if (!table.classList.contains('projects')) table.classList.add('projects');
-  return {table, detail};
+function modifiedCell(iso) {
+  const el = td(shortTime(iso), 'num modified');
+  if (typeof iso === 'string' && iso) el.title = iso;
+  return el;
 }
 
 function renderRoots() {
@@ -77,9 +67,11 @@ function renderRoots() {
   ul.replaceChildren();
   roots.forEach((p, i) => {
     const li = document.createElement('li');
-    li.className = 'row';
+    li.className = 'dir';
     const span = document.createElement('span');
+    span.className = 'dir-path';
     span.textContent = p;
+    span.title = p;
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = 'Remove';
@@ -95,11 +87,8 @@ function renderRoots() {
 }
 
 async function scan() {
-  const {table, detail} = projectsEls();
-  table.replaceChildren();
-  const cap = document.createElement('caption');
-  cap.textContent = 'Scanning…';
-  table.append(cap);
+  const box = $('projects');
+  box.textContent = 'Scanning…';
   const res = await fetch('/api/scan', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -108,74 +97,93 @@ async function scan() {
   const data = await res.json();
   const projects = data.projects || [];
   const found = projects.filter(p => p.found);
-  if (selectedRoot && found.some(p => p.root === selectedRoot)) {
-    /* keep */
-  } else if (found.length === 1) {
-    selectedRoot = found[0].root;
-  } else {
-    selectedRoot = null;
+  if (!(selectedRoot && found.some(p => p.root === selectedRoot))) {
+    openRel = null;
+    fileSort = {key: 'name', dir: 1};
+    selectedRoot = found.length === 1 ? found[0].root : null;
   }
   lastProjects = projects;
   lastDef = data.defaultLifetimeSeconds;
-  renderProjects(table, detail, projects, lastDef);
+  renderProjects(projects, lastDef);
 }
 
-function renderProjects(table, detail, projects, def) {
-  table.replaceChildren();
+function renderProjects(projects, def) {
+  const box = $('projects');
+  box.replaceChildren();
+  const table = document.createElement('table');
+  table.className = 'projects';
   const head = document.createElement('thead');
   const hr = document.createElement('tr');
-  hr.append(th('Project'), th('Files', 'num'), th('Size', 'num size'), th('Expiry'));
+  hr.append(th('Project'), th('Files', 'num'), th('Size', 'num size'), th('Modified', 'num modified'), th('Expiry'));
   head.append(hr);
   const body = document.createElement('tbody');
   projects.forEach(p => body.append(projectRow(p)));
   table.append(head, body);
-  detail.replaceChildren();
-  const selected = projects.find(p => p.found && p.root === selectedRoot);
-  if (selected) detail.append(detailPanel(selected, def));
+  box.append(table);
+  const selected = projects.find(p => p.found && p.root === selectedRoot) || null;
+  renderWorkspace(selected, def);
 }
 
 function projectRow(p) {
   const tr = document.createElement('tr');
   if (!p.found) {
-    const cell = td((p.root || '(root)') + ': ' + (p.error || 'not found'));
-    cell.colSpan = 1;
-    cell.className = 'err';
-    tr.append(cell, td(''), td(''), td(''));
+    const cell = td((p.error || 'not found'), 'err');
+    tr.append(cell, td(''), td(''), td(''), td(''));
     return tr;
   }
   tr.append(
     td(p.root),
     td(String(p.fileCount), 'num'),
     td(human(p.totalBytes), 'num size'),
+    modifiedCell(p.modified),
     td(expiryText(p), (typeof p.lifetimeError === 'string' && p.lifetimeError) ? 'err' : '')
   );
   if (p.root === selectedRoot) tr.classList.add('selected');
   tr.classList.add('pick');
   tr.addEventListener('click', () => {
+    if (selectedRoot !== p.root) {
+      openRel = null;
+      fileSort = {key: 'name', dir: 1};
+    }
     selectedRoot = p.root;
-    const {table, detail} = projectsEls();
-    renderProjects(table, detail, lastProjects, lastDef);
+    renderProjects(lastProjects, lastDef);
   });
   return tr;
 }
 
-function detailPanel(p, def) {
-  const wrap = document.createElement('div');
-  wrap.append(expiryEditor(p, def), fileSplit(p), claimTable(p));
-  return wrap;
+function renderWorkspace(p, def) {
+  const box = $('workspace');
+  box.replaceChildren();
+  if (!p) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = 'Select a project.';
+    box.append(empty);
+    return;
+  }
+  if (openRel && !(p.files || []).some(f => f.rel === openRel)) openRel = null;
+  box.append(workspaceBar(p, def), fileSplit(p), claimPane(p));
 }
 
-function expiryEditor(p, def) {
+function workspaceBar(p, def) {
   const wrap = document.createElement('div');
-  wrap.className = 'row expiry';
+  wrap.className = 'ws-bar';
+  const path = document.createElement('span');
+  path.className = 'livedocs';
+  path.textContent = p.liveDocs || '';
+  path.title = p.liveDocs || '';
+  const editor = document.createElement('div');
+  editor.className = 'expiry-wrap';
+  const row = document.createElement('div');
+  row.className = 'row';
   const label = document.createElement('label');
-  label.textContent = 'Set expiry';
+  label.textContent = 'Expiry';
+  label.htmlFor = 'expiry-amount';
   const num = document.createElement('input');
   num.type = 'number';
   num.min = '1';
-  num.value = p.lifetimeSet ? String(p.lifetimeSeconds) : String(def);
-  label.htmlFor = 'expiry-amount';
   num.id = 'expiry-amount';
+  num.value = p.lifetimeSet ? String(p.lifetimeSeconds) : String(def);
   const sel = document.createElement('select');
   ['seconds', 'days'].forEach(u => {
     const o = document.createElement('option');
@@ -183,7 +191,7 @@ function expiryEditor(p, def) {
     o.textContent = u;
     sel.append(o);
   });
-  const err = document.createElement('span');
+  const err = document.createElement('div');
   err.className = 'err';
   const clearUnitError = () => {
     if (err.textContent === 'Not a whole number of days.' || err.textContent === 'Enter a positive whole number.') {
@@ -231,38 +239,77 @@ function expiryEditor(p, def) {
     }
     scan();
   });
-  wrap.append(label, num, sel, saveBtn, err);
+  row.append(label, num, sel, saveBtn);
+  editor.append(row, err);
+  wrap.append(path, editor);
   return wrap;
+}
+
+function sortFiles(files) {
+  const dir = fileSort.dir;
+  const key = fileSort.key;
+  return files.slice().sort((a, b) => {
+    let c = 0;
+    if (key === 'size') c = (Number(a.bytes) || 0) - (Number(b.bytes) || 0);
+    else if (key === 'modified') c = String(a.modified || '').localeCompare(String(b.modified || ''));
+    else c = String(a.rel || '').localeCompare(String(b.rel || ''));
+    return c * dir;
+  });
 }
 
 function fileSplit(p) {
   const split = document.createElement('div');
   split.className = 'split';
+  const scroll = document.createElement('div');
+  scroll.className = 'file-scroll';
   const table = document.createElement('table');
   table.className = 'files';
   const head = document.createElement('thead');
   const hr = document.createElement('tr');
-  hr.append(th('File'), th('Size', 'num size'));
+  const nameTh = th('Name');
+  const sizeTh = th('Size', 'num size');
+  const modTh = th('Modified', 'num modified');
+  const bindSort = (el, key) => {
+    el.addEventListener('click', () => {
+      if (fileSort.key === key) fileSort.dir = -fileSort.dir;
+      else fileSort = {key, dir: 1};
+      renderWorkspace(p, lastDef);
+    });
+  };
+  bindSort(nameTh, 'name');
+  bindSort(sizeTh, 'size');
+  bindSort(modTh, 'modified');
+  hr.append(nameTh, sizeTh, modTh);
   head.append(hr);
   const body = document.createElement('tbody');
   const viewer = document.createElement('div');
   viewer.className = 'viewer';
-  const empty = document.createElement('p');
-  empty.className = 'meta';
-  empty.textContent = 'Select a file.';
-  viewer.append(empty);
-  (p.files || []).forEach(f => {
+  sortFiles(p.files || []).forEach(f => {
     const tr = document.createElement('tr');
-    tr.append(td(f.rel), td(human(f.bytes), 'num size'));
+    tr.append(td(f.rel), td(human(f.bytes), 'num size'), modifiedCell(f.modified));
+    if (f.rel === openRel) tr.classList.add('open');
     tr.addEventListener('click', () => openFile(p, f, viewer, tr));
     body.append(tr);
   });
   table.append(head, body);
-  split.append(table, viewer);
+  scroll.append(table);
+  if (!openRel) {
+    const empty = document.createElement('p');
+    empty.className = 'meta';
+    empty.textContent = 'Select a file.';
+    viewer.append(empty);
+  }
+  split.append(scroll, viewer);
+  if (openRel) {
+    const f = (p.files || []).find(x => x.rel === openRel);
+    const row = body.querySelector('tr.open');
+    if (f && row) openFile(p, f, viewer, row);
+  }
   return split;
 }
 
 async function openFile(p, f, view, row) {
+  openRel = f.rel;
   row.parentElement.querySelectorAll('tr').forEach(tr => tr.classList.remove('open'));
   row.classList.add('open');
   view.replaceChildren();
@@ -292,10 +339,10 @@ async function openFile(p, f, view, row) {
   }
 }
 
-function claimTable(p) {
-  const wrap = document.createElement('div');
+function claimPane(p) {
+  const pane = document.createElement('div');
+  pane.className = 'claims';
   const table = document.createElement('table');
-  table.className = 'claims';
   const head = document.createElement('thead');
   const hr = document.createElement('tr');
   hr.append(th('Run'), th('Claim'), th('Text'));
@@ -310,8 +357,8 @@ function claimTable(p) {
     });
   });
   table.append(head, body);
-  wrap.append(table, pre);
-  return wrap;
+  pane.append(table, pre);
+  return pane;
 }
 
 function claimRow(p, name, claim, text, pre) {

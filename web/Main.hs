@@ -187,7 +187,7 @@ page = doctypehtml_ $ do
   body_ $ do
     h1_ "Live docs"
     section_ [class_ "roots"] $ do
-      p_ [class_ "hint"] "Saved in this browser only. Each path is a project, or a folder of projects. The page looks for live-docs up to two levels down."
+      p_ [class_ "hint"] "Add a project directory. Saved in this browser only."
       div_ [class_ "row"] $ do
         input_ [id_ "root-input", type_ "text", placeholder_ "/absolute/path"]
         button_ [id_ "add-root", type_ "button"] "Add"

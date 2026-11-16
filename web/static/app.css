@@ -8,17 +8,9 @@ body {
 }
 
 h1 {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
   font-weight: 560;
   font-size: 1.45rem;
   margin: 0 0 .75rem;
-}
-
-.ph {
-  font-size: 1.5rem;
-  color: #9eb7ff;
 }
 
 .hint {
@@ -59,18 +51,69 @@ ul {
   margin: .4rem 0;
 }
 
-.card {
-  border: 1px solid #2c3142;
-  border-radius: 10px;
-  padding: .8rem 1rem;
-  margin: .8rem 0;
-  background: #181b24;
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: .6rem 0;
 }
 
-h2 {
-  font-size: 1.05rem;
+th, td {
+  text-align: left;
+  padding: .35rem .55rem;
+  border-bottom: 1px solid #2c3142;
+  vertical-align: top;
+}
+
+th {
+  color: #a7adba;
   font-weight: 560;
-  margin: .1rem 0 .3rem;
+  font-size: .85rem;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.size {
+  width: 6rem;
+  text-align: right;
+}
+
+table.files tbody tr {
+  cursor: pointer;
+}
+
+tr.selected, tr.open {
+  background: #243049;
+}
+
+.detail {
+  margin-top: .4rem;
+}
+
+.expiry {
+  margin: .8rem 0 .2rem;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) minmax(18rem, 2fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.viewer {
+  min-height: 8rem;
+  background: #181b24;
+  border: 1px solid #2c3142;
+  border-radius: 10px;
+  padding: .6rem .8rem;
+}
+
+.path {
+  margin: 0 0 .4rem;
+  color: #b7beca;
+  font-size: .9rem;
 }
 
 .meta {
@@ -94,4 +137,16 @@ pre {
 
 .err {
   color: #ffb4b4;
+}
+
+caption {
+  text-align: left;
+  color: #a7adba;
+  margin-bottom: .4rem;
+}
+
+@media (max-width: 800px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
 }

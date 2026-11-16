@@ -9,7 +9,7 @@ in pkgs.mkShell {
     (hp.ghcWithPackages (p: [
       p.aeson p.bytestring p.containers p.Diff p.directory p.filepath
       p.hspec p.lucid p.process p.scotty p.string-conversions p.text
-      p.time p.transformers p.unix p.warp
+      p.time p.transformers p.unix p.warp p.http-types p.file-embed
     ]))
   ];
 }

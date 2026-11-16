@@ -8,6 +8,9 @@ name:           explore-accelerator
 version:        0.1.0.0
 synopsis:       Replayable explore claims checker (expacc)
 build-type:     Simple
+extra-source-files:
+    web/static/app.css
+    web/static/app.js
 
 library
   exposed-modules:
@@ -80,6 +83,7 @@ executable expacc
 executable live-docs-web
   main-is: Main.hs
   other-modules:
+      Scan
       Paths_explore_accelerator
   hs-source-dirs:
       web
@@ -97,6 +101,7 @@ executable live-docs-web
     , containers
     , directory
     , explore-accelerator
+    , file-embed
     , filepath
     , http-types
     , lucid

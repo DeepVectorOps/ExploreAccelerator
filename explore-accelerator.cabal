@@ -20,6 +20,7 @@ library
       Claims.RgGroup
       Claims.Run
       Claims.SedRange
+      LiveDocs.Config
       Prune
       Record
   other-modules:
@@ -76,11 +77,45 @@ executable expacc
     , unix
   default-language: GHC2021
 
+executable live-docs-web
+  main-is: Main.hs
+  other-modules:
+      Paths_explore_accelerator
+  hs-source-dirs:
+      web
+  default-extensions:
+      LambdaCase
+      ScopedTypeVariables
+      RecordWildCards
+      OverloadedStrings
+  ghc-options: -threaded -Wno-x-partial
+  build-depends:
+      Diff
+    , aeson
+    , base
+    , bytestring
+    , containers
+    , directory
+    , explore-accelerator
+    , filepath
+    , http-types
+    , lucid
+    , process
+    , scotty
+    , string-conversions
+    , text
+    , time
+    , transformers
+    , unix
+    , warp
+  default-language: GHC2021
+
 test-suite spec
   type: exitcode-stdio-1.0
   main-is: Main.hs
   other-modules:
       Test.ClaimsTest
+      Test.LiveDocsConfigTest
       Test.PruneTest
       Paths_explore_accelerator
   hs-source-dirs:

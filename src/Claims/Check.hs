@@ -2,6 +2,7 @@
 module Claims.Check
   ( resolveExploreDir
   , checkClaims
+  , checkRef
   , replayClaim
   , listClaimsNames
   , lintFile
@@ -109,6 +110,16 @@ checkClaims :: FilePath -> [ClaimsName] -> IO [ClaimResult]
 checkClaims dir names = do
   env <- Env dir <$> newIORef mempty <*> newIORef mempty <*> newIORef []
   forM_ names $ visit env Target Nothing
+  reverse <$> readIORef (envOut env)
+
+-- | One claims file, or one claim id. A single id still lints that file and
+-- follows its dependencies: 'visit' does both when @only@ is 'Just'.
+checkRef :: FilePath -> DepRef -> IO [ClaimResult]
+checkRef dir ref = do
+  env <- Env dir <$> newIORef mempty <*> newIORef mempty <*> newIORef []
+  case ref of
+    WholeFile name -> visit env Target Nothing name
+    OneClaim name i -> visit env Target (Just i) name
   reverse <$> readIORef (envOut env)
 
 visit :: Env -> Origin -> Maybe ClaimId -> ClaimsName -> IO ()

@@ -78,6 +78,13 @@ output: src/auth.js:const TTL = 7200;
 1 true, 1 false
 ```
 
+## Web explorer
+
+`live-docs-web` listens on 127.0.0.1:3090. It imports this library and does not
+run the expacc binary. Project directories are stored in the browser.
+`explore-lifetime` is seconds in `live-docs/.live-docs-config.json`. The page
+can set seconds or days; 1 day is stored as 86400.
+
 ## Claude Code setup: the AcceleratedExplore agent
 
 [agents/AcceleratedExplore.md](agents/AcceleratedExplore.md) is a Claude Code

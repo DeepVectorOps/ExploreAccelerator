@@ -37,6 +37,23 @@ executables:
     ghc-options:
     - -threaded
     - -Wno-x-partial
+  live-docs-web:
+    main: Main.hs
+    source-dirs: web
+    dependencies:
+    - explore-accelerator
+    - lucid
+    - scotty
+    - warp
+    - aeson
+    - bytestring
+    - directory
+    - filepath
+    - text
+    - http-types
+    ghc-options:
+    - -threaded
+    - -Wno-x-partial
 
 tests:
   spec:

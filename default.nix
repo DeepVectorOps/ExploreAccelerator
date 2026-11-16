@@ -1,8 +1,7 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ sources ? import ./nix/sources.nix }:
 let
+  pkgs = import sources.nixpkgs { config = { allowBroken = true; }; };
   hp = pkgs.haskellPackages;
-  # Claims shell out to rg, so it must be on PATH for the test suite (run as
-  # part of the build) and at runtime.
   pkg = pkgs.haskell.lib.overrideCabal (hp.callCabal2nix "explore-accelerator" ./. {}) (old: {
     testToolDepends = (old.testToolDepends or []) ++ [ pkgs.ripgrep ];
   });

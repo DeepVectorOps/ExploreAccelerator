@@ -62,30 +62,34 @@ routes lock = do
     Left e -> bad e
     Right v -> case parseEither (A.withObject "check" (\o -> (,) <$> o .: "root" <*> o .: "name")) v of
       Left e -> bad (cs e)
-      Right (root :: Text, name :: Text) -> case parseDepRef name of
+      Right (root :: Text, name :: Text) -> case validAbsolute (cs root) of
         Left e -> bad e
-        Right ref -> do
-          let explore = cs root </> "live-docs" </> "explore"
-          exists <- liftIO (doesDirectoryExist explore)
-          if not exists
-            then bad "explore directory is missing"
-            else do
-              rs <- liftIO (withProjectCwd lock (cs root) (checkRef explore ref))
-              json (object ["ok" .= allTrue rs, "text" .= renderResults PrintAll rs])
+        Right rootPath -> case parseDepRef name of
+          Left e -> bad e
+          Right ref -> do
+            let explore = rootPath </> "live-docs" </> "explore"
+            exists <- liftIO (doesDirectoryExist explore)
+            if not exists
+              then bad "explore directory is missing"
+              else do
+                rs <- liftIO (withProjectCwd lock rootPath (checkRef explore ref))
+                json (object ["ok" .= allTrue rs, "text" .= renderResults PrintAll rs])
   post "/api/lifetime" $ jsonBody >>= \case
     Left e -> bad e
     Right v -> case parseLifetimeReq v of
       Left e -> bad e
-      Right (root, secs) -> do
-        let live = cs root </> "live-docs"
-        known <- liftIO (doesDirectoryExist live)
-        if not known
-          then bad "unknown project root"
-          else do
-            wrote <- liftIO (writeExploreLifetime live secs)
-            case wrote of
-              Left e -> bad e
-              Right () -> json (object ["lifetimeSeconds" .= secs])
+      Right (root, secs) -> case validAbsolute (cs root) of
+        Left e -> bad e
+        Right rootPath -> do
+          let live = rootPath </> "live-docs"
+          known <- liftIO (doesDirectoryExist live)
+          if not known
+            then bad "unknown project root"
+            else do
+              wrote <- liftIO (writeExploreLifetime live secs)
+              case wrote of
+                Left e -> bad e
+                Right () -> json (object ["lifetimeSeconds" .= secs])
 
 jsonBody :: ActionM (Either Text A.Value)
 jsonBody = do
@@ -143,10 +147,13 @@ scanRoots :: [Text] -> IO A.Value
 scanRoots roots = do
   projects <- fmap concat $ forM roots $ \r -> do
     let path = cs r
-    exists <- doesDirectoryExist path
-    if not (isAbsolute path) || not exists
-      then pure [missing r (if not (isAbsolute path) then "path is not absolute" else "missing or not a directory")]
-      else findLiveDocs path >>= mapM projectHit
+    case validAbsolute path of
+      Left e -> pure [missing r e]
+      Right absPath -> do
+        exists <- doesDirectoryExist absPath
+        if not exists
+          then pure [missing r "missing or not a directory"]
+          else findLiveDocs absPath >>= mapM projectHit
   pure $ object ["defaultLifetimeSeconds" .= defaultExploreLifetime, "projects" .= projects]
 
 missing :: Text -> Text -> A.Value
@@ -165,9 +172,10 @@ projectHit live = do
   let total = sum [b | (_, b, _) <- files]
   life <- readExploreLifetime live
   claims <- readClaims (live </> "explore")
-  let (set, secs) = case life of
-        Right (Just n) -> (True, Just n)
-        _ -> (False, Nothing)
+  let (set, secs, lifeErr) = case life of
+        Right (Just n) -> (True, Just n, Nothing :: Maybe Text)
+        Right Nothing -> (False, Nothing, Nothing)
+        Left e -> (False, Nothing, Just e)
   pure $
     object
       [ "root" .= takeDirectory live
@@ -177,6 +185,7 @@ projectHit live = do
       , "totalBytes" .= total
       , "lifetimeSeconds" .= secs
       , "lifetimeSet" .= set
+      , "lifetimeError" .= lifeErr
       , "files" .= [object ["rel" .= rel, "bytes" .= b, "markdown" .= md] | (rel, b, md) <- files]
       , "claims" .= claims
       ]
@@ -218,27 +227,38 @@ readClaims explore = do
             ]
     pure (object ["name" .= n, "claims" .= claims])
 
+-- | Absolute path with no empty, "." or ".." segment. Does not canonicalize.
+validAbsolute :: FilePath -> Either Text FilePath
+validAbsolute p
+  | not (isAbsolute p) = Left "path is not absolute"
+  | any (`elem` [".", "..", ""]) (splitDirectories p) = Left "path must not contain . or .."
+  | otherwise = Right p
+
 readLiveFile :: FilePath -> FilePath -> IO (Either Text BS.ByteString)
-readLiveFile root rel
-  | not (isAbsolute root) = pure (Left "root must be absolute")
-  | badRel rel = pure (Left "relative path is not allowed")
-  | otherwise = do
-      let live = root </> "live-docs"
-      known <- doesDirectoryExist live
-      if not known
-        then pure (Left "unknown project root")
-        else do
-          canonLive <- tryIO (canonicalizePath live)
-          canonFile <- tryIO (canonicalizePath (live </> rel))
-          case (canonLive, canonFile) of
-            (Left _, _) -> pure (Left "live-docs path is not readable")
-            (_, Left _) -> pure (Left "file is not readable")
-            (Right cl, Right cf) -> do
-              isFile <- doesFileExist cf
-              let under = (addSlash cl) `isPrefixOf` cf
-              if not isFile || not under
-                then pure (Left "path is outside live-docs")
-                else Right <$> BS.readFile cf
+readLiveFile root rel = case validAbsolute root of
+  Left e -> pure (Left e)
+  Right rootPath
+    | badRel rel -> pure (Left "relative path is not allowed")
+    | otherwise -> readLiveFile' rootPath rel
+
+readLiveFile' :: FilePath -> FilePath -> IO (Either Text BS.ByteString)
+readLiveFile' root rel = do
+  let live = root </> "live-docs"
+  known <- doesDirectoryExist live
+  if not known
+    then pure (Left "unknown project root")
+    else do
+      canonLive <- tryIO (canonicalizePath live)
+      canonFile <- tryIO (canonicalizePath (live </> rel))
+      case (canonLive, canonFile) of
+        (Left _, _) -> pure (Left "live-docs path is not readable")
+        (_, Left _) -> pure (Left "file is not readable")
+        (Right cl, Right cf) -> do
+          isFile <- doesFileExist cf
+          let under = (addSlash cl) `isPrefixOf` cf
+          if not isFile || not under
+            then pure (Left "path is outside live-docs")
+            else Right <$> BS.readFile cf
 
 addSlash :: FilePath -> FilePath
 addSlash p
@@ -391,7 +411,10 @@ pageJs =
     , "  wrap.className = 'row';"
     , "  const label = document.createElement('span');"
     , "  label.className = 'meta';"
-    , "  if (!p.lifetimeSet) {"
+    , "  if (typeof p.lifetimeError === 'string' && p.lifetimeError) {"
+    , "    label.textContent = p.lifetimeError;"
+    , "    label.className = 'err';"
+    , "  } else if (!p.lifetimeSet) {"
     , "    label.textContent = 'Not set. Script default ' + def + ' seconds (' + daysLabel(def) + ' days).';"
     , "  } else {"
     , "    label.textContent = p.lifetimeSeconds + ' seconds (' + daysLabel(p.lifetimeSeconds) + ' days).';"
@@ -405,11 +428,31 @@ pageJs =
     , "    const o = document.createElement('option');"
     , "    o.value = u; o.textContent = u; sel.append(o);"
     , "  });"
+    , "  sel.addEventListener('change', () => {"
+    , "    const raw = num.value.trim();"
+    , "    const n = Number(raw);"
+    , "    const whole = raw !== '' && Number.isFinite(n) && Number.isInteger(n) && n > 0;"
+    , "    if (sel.value === 'days') {"
+    , "      if (whole && n % 86400 === 0) { num.value = String(n / 86400); label.className = 'meta'; }"
+    , "      else { num.value = ''; label.textContent = 'Not a whole number of days.'; label.className = 'err'; }"
+    , "    } else if (whole) {"
+    , "      num.value = String(n * 86400);"
+    , "      label.className = 'meta';"
+    , "    } else {"
+    , "      num.value = '';"
+    , "    }"
+    , "  });"
     , "  const saveBtn = document.createElement('button');"
     , "  saveBtn.type = 'button';"
     , "  saveBtn.textContent = 'Save';"
     , "  saveBtn.addEventListener('click', async () => {"
-    , "    const amount = Number(num.value);"
+    , "    const raw = num.value.trim();"
+    , "    const amount = Number(raw);"
+    , "    if (raw === '' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {"
+    , "      label.textContent = 'Enter a positive whole number.';"
+    , "      label.className = 'err';"
+    , "      return;"
+    , "    }"
     , "    const res = await fetch('/api/lifetime', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({root: p.root, amount, unit: sel.value})});"
     , "    const data = await res.json();"
     , "    if (!res.ok) { label.textContent = data.error || 'save failed'; label.className = 'err'; return; }"

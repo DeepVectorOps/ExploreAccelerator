@@ -400,12 +400,97 @@ pre {
 }
 
 .run-all-summary {
-  padding: .6rem .8rem;
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+  padding: .8rem;
   border-bottom: 1px solid #34384a;
 }
 
-.run-all-summary p {
-  margin: .15rem 0;
+.run-all-progress {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-group h3 {
+  margin: 0 0 .4rem;
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #9097a8;
+}
+
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  gap: .5rem;
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  padding: .5rem .65rem;
+  background: #1e2230;
+  border: 1px solid #2a2f40;
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.stat-num {
+  font-size: 1.5rem;
+  font-weight: 620;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-num.zero {
+  color: #5c6274;
+}
+
+.stat-label {
+  font-size: .78rem;
+  color: #b4bac8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-pct {
+  font-size: .75rem;
+  color: #7c8396;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-bar {
+  display: flex;
+  height: 6px;
+  margin-top: .5rem;
+  overflow: hidden;
+  background: #262a38;
+  border-radius: 3px;
+}
+
+.run-all-progress .stat-bar {
+  margin-top: 0;
+}
+
+.stat-bar > span {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  transition: width .2s;
+}
+
+.stat-bar > .progress-fill {
+  background: #6c8cff;
+}
+
+.stat-bar > .failed {
+  background: #7a3a40;
 }
 
 .run-all-table {
@@ -425,6 +510,18 @@ pre {
   text-align: left;
   padding: .3rem .5rem;
   border-bottom: 1px solid #262a38;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-all-table th:not(:first-child),
+.run-all-table td:not(:first-child) {
+  text-align: right;
+}
+
+.run-all-table td:first-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .run-all-table th {

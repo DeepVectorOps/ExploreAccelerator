@@ -673,39 +673,68 @@ function renderRunAllSummary(tally, total) {
   const box = runAllDialog.querySelector('.run-all-summary');
   box.replaceChildren();
   const num = n => n.toLocaleString('en-US');
-  const share = n => (tally.claims ? ' (' + Math.round(100 * n / tally.claims) + '%)' : '');
-  const line = (label, parts) => {
-    const p = document.createElement('p');
-    const head = document.createElement('strong');
-    head.textContent = label + ':';
-    p.append(head);
-    parts.forEach((part, i) => {
-      p.append(document.createTextNode(i ? ' · ' : ' '));
-      const span = document.createElement('span');
-      span.textContent = part[0];
-      if (part[1]) span.className = part[1];
-      p.append(span);
+  const pctOf = (n, of) => (of ? Math.round(100 * n / of) + '%' : '');
+  const el = (tag, className, text) => {
+    const e = document.createElement(tag);
+    if (className) e.className = className;
+    if (text != null) e.textContent = text;
+    return e;
+  };
+  // tiles: [value, label, colour class, share of the group total or null].
+  const group = (label, of, tiles, bar) => {
+    const g = el('section', 'stat-group');
+    g.append(el('h3', null, label));
+    const grid = el('div', 'stat-tiles');
+    tiles.forEach(([value, name, cls, share]) => {
+      const tile = el('div', 'stat-tile');
+      tile.append(el('span', 'stat-num ' + (value ? cls || '' : 'zero'), num(value)),
+        el('span', 'stat-label', name),
+        el('span', 'stat-pct', share ? pctOf(value, of) : '\u00a0'));
+      grid.append(tile);
     });
-    return p;
+    g.append(grid);
+    if (of) {
+      const track = el('div', 'stat-bar');
+      bar.forEach(([value, cls]) => {
+        if (!value) return;
+        const seg = el('span', cls);
+        seg.style.width = (100 * value / of) + '%';
+        track.append(seg);
+      });
+      g.append(track);
+    }
+    return g;
   };
   const done = tally.good + tally.mid + tally.bad + tally.none + tally.failed;
-  const claims = [
-    [num(tally.claims) + ' total'],
-    [num(tally.true) + ' true' + share(tally.true), 'pct-good'],
-    [num(tally.false) + ' false' + share(tally.false), 'pct-bad'],
-    [num(tally.drifted) + ' drifted' + share(tally.drifted), 'drifted']
-  ];
+  if (done < total) {
+    const prog = el('div', 'run-all-progress');
+    prog.append(el('span', null, 'Checking ' + num(done) + ' / ' + num(total) + ' files…'));
+    const track = el('div', 'stat-bar');
+    const fill = el('span', 'progress-fill');
+    fill.style.width = (100 * done / total) + '%';
+    track.append(fill);
+    prog.append(track);
+    box.append(prog);
+  }
+  const claims = group('Claims', tally.claims, [
+    [tally.claims, 'Total'],
+    [tally.true, 'True', 'pct-good', true],
+    [tally.false, 'False', 'pct-bad', true],
+    [tally.drifted, 'Drifted', 'drifted', true]
+  ], [[tally.true, 'pct-good'], [tally.false, 'pct-bad'], [tally.drifted, 'drifted']]);
   // Thresholds match pctText: green > 75%, orange 50–75%, red < 50%.
-  const files = [
-    [done < total ? 'Checking ' + num(done) + ' / ' + num(total) + ' files…' : num(total)],
-    [num(tally.good) + ' green (>75%)', 'pct-good'],
-    [num(tally.mid) + ' orange (50–75%)', 'pct-mid'],
-    [num(tally.bad) + ' red (<50%)', 'pct-bad'],
-    [num(tally.driftedFiles) + ' with drifted claims', 'drifted']
+  const fileTiles = [
+    [total, 'Total'],
+    [tally.good, 'Green (>75%)', 'pct-good', true],
+    [tally.mid, 'Orange (50–75%)', 'pct-mid', true],
+    [tally.bad, 'Red (<50%)', 'pct-bad', true],
+    [tally.driftedFiles, 'With drift', 'drifted', true]
   ];
-  if (tally.none) files.push([num(tally.none) + ' no claims']);
-  if (tally.failed) files.push([num(tally.failed) + ' failed', 'pct-bad']);
-  box.append(line('Claims', claims), line('Files', files));
+  if (tally.none) fileTiles.push([tally.none, 'No claims', null, true]);
+  if (tally.failed) fileTiles.push([tally.failed, 'Failed', 'pct-bad', true]);
+  const files = group('Files', total, fileTiles,
+    [[tally.good, 'pct-good'], [tally.mid, 'pct-mid'], [tally.bad, 'pct-bad'], [tally.failed, 'failed']]);
+  box.append(claims, files);
 }
 
 let runAllSeq = 0;

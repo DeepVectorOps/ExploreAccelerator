@@ -58,8 +58,6 @@ h1 {
 
 #projects {
   flex: 0 0 auto;
-  max-height: 9rem;
-  overflow: auto;
 }
 
 #workspace {
@@ -185,12 +183,26 @@ tr.selected, tr.open {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: auto;
 }
 
 .note-scroll {
-  flex: 1;
+  flex: none;
+  height: auto;
+  max-height: none;
   min-height: 8rem;
-  overflow: auto;
+  overflow: visible;
+}
+
+table.notes-table {
+  table-layout: fixed;
+  max-width: 100%;
+}
+
+table.notes-table th,
+table.notes-table td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 table.notes-table th {
@@ -203,9 +215,10 @@ table.notes-table tbody tr {
 }
 
 .orphans {
-  flex: 0 0 auto;
-  max-height: 8rem;
-  overflow: auto;
+  flex: none;
+  height: auto;
+  max-height: none;
+  overflow: visible;
   border-top: 1px solid #2c3142;
   padding-top: .35rem;
 }
@@ -223,9 +236,13 @@ table.notes-table tbody tr {
 }
 
 .viewer {
-  flex: 1;
+  flex: none;
+  height: auto;
+  max-height: none;
   min-height: 8rem;
-  overflow: auto;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   background: #181b24;
   border: 1px solid #2c3142;
   border-radius: 8px;
@@ -233,10 +250,12 @@ table.notes-table tbody tr {
 }
 
 .note-claims {
-  flex: 0 0 11rem;
-  height: 11rem;
-  max-height: 11rem;
-  overflow: auto;
+  flex: none;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   margin-top: .4rem;
   border-top: 1px solid #2c3142;
 }
@@ -252,11 +271,15 @@ pre {
   background: #0e1016;
   padding: .6rem;
   border-radius: 8px;
-  overflow: auto;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .md {
   max-width: 48rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .md h1 { font-size: 1.45rem; margin: .8rem 0 .4rem; }
@@ -268,18 +291,23 @@ pre {
   background: #0e1016;
   padding: .05rem .25rem;
   border-radius: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .md pre {
   background: #0e1016;
   padding: .6rem;
-  overflow: auto;
+  white-space: pre-wrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .md pre code {
   background: transparent;
   padding: 0;
 }
 .md a { color: #8eb6ff; }
-.md table { width: auto; margin: .4rem 0 .8rem; }
+.md table { width: auto; max-width: 100%; margin: .4rem 0 .8rem; }
 .md th, .md td { border: 1px solid #2c3142; }
 
 .err {

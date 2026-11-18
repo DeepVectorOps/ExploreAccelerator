@@ -1,146 +1,193 @@
 # expacc
 
-Re-checks **replayable claims** written by explore agents: a statement, a
-command, and the output it is expected to produce. A claim holds while
-replaying the command gives the same output.
+Explore agents write notes about a codebase, and those notes go stale.
+`expacc` makes them checkable: each note comes with **replayable claims**,
+each one a statement, a bash command and the output that command is expected to
+print. A claim holds while replaying the command prints the same output. When
+code only moves, the claim is marked DRIFTED and can be updated automatically.
 
-For writing claims and checking them, see [skills/expacc/SKILL.md](skills/expacc/SKILL.md).
+This repo contains:
 
-## Build
+- `expacc`, the CLI that records, checks, fixes and prunes claims
+- `live-docs-web`, a local web UI for browsing notes and running checks
+- the `AcceleratedExplore` Claude Code agent and the `expacc` skill it uses
+
+## Quick start
 
 ```sh
-nix-build   # builds expacc and runs the tests
-nix-shell   # dev shell
+nix-env -i -f default.nix                 # installs expacc and live-docs-web
+cd ~/src/my-project                       # the repo the claims describe
+expacc record auth --id login --text "Login is handled in src/auth.js" \
+  -- 'rg -n --sort path handleLogin src'
+expacc check auth
 ```
 
-## Usage
+## Install
+
+```sh
+nix-env -i -f default.nix
+```
+
+This builds the package (and runs its tests), then installs both `expacc` and
+`live-docs-web` into `~/.nix-profile/bin`.
+
+## CLI
 
 ```
-expacc check NAME... [--print-all | --print-true | --print-false | --minimal-output]
+expacc check NAME... [--print-all | --print-true | --print-false | --minimal-output] [--moved-lines-jsonl]
 expacc lint NAME...
-expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- 'CMD'
-expacc record-append NAME --id ID --text TEXT -- 'CMD'
+expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD
+expacc record-append NAME --id ID --text TEXT -- CMD
 expacc record-fix NAME ID
-expacc fix-line-shift [NAME...] [--dry-run]
+expacc fix-line-shift [NAME...] [--dry-run] [--moved-lines-jsonl]
 expacc prune [--dry-run] [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]
 ```
 
-`CMD` is one bash string, run with `bash -c`, so pipes and redirects work.
-`record` runs it and stores its output as the expected output.
-`check` also reports lint problems. `NAME` is a slug (`other`, or `other#id` for one claim) and resolves to `claims/other.claims.jsonl`
-in `$EXPACC_DIR` (default `./live-docs/explore`). Commands run from
-the current directory, so run it from the repo the claims describe.
+- `NAME` is a slug (`auth`, or `auth#login` for one claim). It resolves to
+  `$EXPACC_DIR/claims/NAME.claims.jsonl`, where `EXPACC_DIR` defaults to
+  `./live-docs/explore`.
+- `CMD` is one bash string run with `bash -c` from the current directory, so
+  pipes and redirects work. Run expacc from the repo the claims describe.
+- `record` creates the file with one claim, `record-append` adds a claim, and
+  `record-fix` re-runs a claim and rewrites its expected output.
+- `check` also reports lint problems. Exit code: `0` all true, `1` any false
+  or drifted, `2` bad usage.
 
-`prune` deletes docs in `$EXPACC_DIR/*.md` together with their claims file.
-`--delete-if-older 7d` (units `d`/`h`/`m`/`s`, by file mtime) and
-`--delete-if-inaccurate 0.5` (true/total claims below the ratio) apply only to
-docs with a claims file and are ANDed when both are given;
-`--delete-if-missing-claim` separately deletes docs with no claims file.
-`--delete-if-older` also applies to those when both are given, so a young
-doc with no claims file is kept. It prints `deleted SLUG (reasons)` and each file removed. A low true-claim
-ratio is reported as `T/N claims true, below RATIO` (true claims over total,
-not inaccurate over total). `--dry-run` prints `would delete` and the same
-file list without removing anything. The summary is still `N deleted`.
+The claims file format and how to write good claims are in
+[skills/expacc/SKILL.md](skills/expacc/SKILL.md).
 
-`--print-false` (default) shows only failing claims, with a diff; `--print-true`
-and `--print-all` show passing / all claims. Each shown claim also prints the
-command that ran and its stdout, prefixed `command:` and `output:`.
-`--minimal-output` prints only the summary totals, and for each false claim
-`FALSE file#id` (or `DRIFTED file#id`) and the command that failed. The summary
-line (`OK: N true, M false`, plus `, K drifted` when any) is printed first and last. Exit code:
-`0` all true, `1` any false, `2` bad usage.
+### Check output
 
-When the command runs `rg` with line numbers (`-n`, `--line-number`, `-nA5`,
-...) and every output line parses as rg's `path:N:text` / `path-N-text` /
-`N:text` / `--` format, lines are grouped into blocks of consecutive lines
-(`path:START-END` plus the text). If only the numbers changed, the claim is
-`DRIFTED` (not FALSE) with `same lines, line numbers moved by +N (expacc
-fix-line-shift NAME to update)`, then `claim:`, `command:` and one aligned row per
-output line, `path  OLD -> NEW  text` (an unmoved line shows only its number), in
-place of the `output:` trace. Otherwise the diff is on the grouped blocks, so only
-headers and changed lines show as `-`/`+`. Whenever output is shown transformed
-like this, the section says `(command output was transformed: ...)`. The recorded
-`expect` stays raw rg output.
-
-A command that is just `sed -n 'A,Bp' FILE` gets the same verdict when its
-expected lines sit, unchanged, at exactly one other place in the file.
-`expacc fix-line-shift` updates such claims (a new `expect` for rg, a new range
-in `cmd` for sed) and prints what moved; with no NAME it covers every claims
-file. See [skills/expacc/keeping-live-docs-up-to-date.md](skills/expacc/keeping-live-docs-up-to-date.md).
+`--print-false` (default) shows failing and drifted claims; `--print-true` and
+`--print-all` also show passing ones. `--minimal-output` prints only the totals
+and, for each failing claim, `FALSE file#id` (or `DRIFTED file#id`) with its
+command. The summary line is printed at the top and the bottom:
 
 ```
-FAILED: 1 true, 1 false
+FAILED: 0 true, 1 false, 1 drifted
 
-TRUE  auth-flow#login-handler  Login is handled in src/auth.js
-command: rg -n handleLogin src
-output: src/auth.js:42:export async function handleLogin(req, res) {
+DRIFTED demo#port  -- same lines, line numbers moved by +4 (expacc fix-line-shift demo to update)
+claim: The web UI listens on port 3090
+command: rg -n --sort path 'setPort 3090' web/Main.hs
+output (command output was transformed: one row per line, path  old -> new line number):
+    web/Main.hs  30 -> 34    let settings = setHost "127.0.0.1" (setPort 3090 (setTimeout 0 defaultSettings))
 
-FALSE auth-flow#token-ttl  Tokens expire after 1h  -- output differs
-command: rg -n TTL src/auth.js
-output: src/auth.js:const TTL = 7200;
-    - src/auth.js:const TTL = 3600;
-    + src/auth.js:const TTL = 7200;
+FALSE demo#static  Static dir defaults to web/static  -- output differs
+command: rg -n --sort path 'LIVE_DOCS_STATIC' web/Main.hs
+output: 33:  staticDir <- maybe "web/static" id <$> lookupEnv "LIVE_DOCS_STATIC"
+diff (command output was transformed: rg lines grouped into path:START-END blocks):
+      line 33
+    -     staticDir <- maybe "static" id <$> lookupEnv "LIVE_DOCS_STATIC"
+    +     staticDir <- maybe "web/static" id <$> lookupEnv "LIVE_DOCS_STATIC"
 
-FAILED: 1 true, 1 false
+line map (every line of the drifted claims above, merged per file; old -> new):
+  web/Main.hs
+    offsets (listed lines only): line 30: +4
+    30 -> 34    +4  demo#port
+Only the lines listed are known. A cited line that is not listed may have moved by
+another offset or changed: find it again (rg -n 'its text' PATH), never interpolate
+between listed lines or extend an offset range past its listed ends.
+
+FAILED: 0 true, 1 false, 1 drifted
 ```
 
-## Web explorer
+### Drift and `fix-line-shift`
 
-`live-docs-web` listens on 127.0.0.1:3090. It imports this library and does not
-run the expacc binary. Project directories are stored in the browser.
-`explore-lifetime` is seconds in `live-docs/.live-docs-config.json`. The page
-can set seconds or days; 1 day is stored as 86400.
+A claim is DRIFTED rather than FALSE when its lines are unchanged and only
+their position moved. This covers two kinds of command:
 
-## Claude Code setup: the AcceleratedExplore agent
+- `rg` with line numbers (`-n`, `--line-number`, `-nA5`, ...) whose output
+  parses as rg lines. The output is grouped into `path:START-END` blocks, so a
+  FALSE diff shows only headers and changed lines. The recorded `expect` stays
+  raw rg output.
+- a bare `sed -n 'A,Bp' FILE`, when the expected lines appear unchanged at
+  exactly one other place in the file.
 
-[agents/AcceleratedExplore.md](agents/AcceleratedExplore.md) is a Claude Code
-subagent that works like the built-in Explore agent, but records its answer.
-It checks prior notes in `live-docs/explore/` with `expacc`, investigates only
-the gaps, writes `live-docs/explore/<slug>.md`, and messages the parent the
-path straight away so it isn't kept waiting. Only then does it record and check
-the claims file (best effort; the note itself is never edited afterwards), and
-it finishes by replying with just the path. It runs on Haiku and has the `expacc` skill
-preloaded.
+Drifted claims are followed by a per-file line map of every moved line. Any
+transformed section is labelled `(command output was transformed: ...)`.
 
-### 1. Install expacc
+`expacc fix-line-shift [NAME...]` rewrites drifted claims (a new `expect` for
+rg, a new range for sed) and prints what moved. With no `NAME` it covers every
+claims file; `--dry-run` changes nothing. `--moved-lines-jsonl` (on `check` or
+`fix-line-shift`) prints one JSON object per moved line instead,
+`{"path", "old", "new", "claim", "text"}` with `path` null when unknown, and
+leaves the exit status unchanged. See
+[skills/expacc/keeping-live-docs-up-to-date.md](skills/expacc/keeping-live-docs-up-to-date.md).
+
+### Prune
+
+`prune` deletes notes in `$EXPACC_DIR/*.md` together with their claims file.
+
+- `--delete-if-older DUR` (`7d`, `1h`, `30m`, `45s`, by file mtime) and
+  `--delete-if-inaccurate RATIO` (true claims over total below `RATIO`) apply
+  to notes with a claims file and are ANDed when both are given.
+- `--delete-if-missing-claim` deletes notes with no claims file. With
+  `--delete-if-older` as well, only old ones are deleted.
+- Each deleted note prints `deleted SLUG (reasons)` and the files removed;
+  `--dry-run` prints `would delete` and removes nothing.
+
+## Web UI
 
 ```sh
-nix-env -i -f default.nix   # installs expacc into ~/.nix-profile/bin
+cd /path/to/explore-accelerator   # or set LIVE_DOCS_STATIC
+live-docs-web
 ```
 
-### 2. Configure Claude
+`live-docs-web` listens on http://127.0.0.1:3090 only. It reads its assets from
+`web/static` relative to the current directory on every request, so start it
+from this checkout or set `LIVE_DOCS_STATIC=/path/to/web/static`.
 
-Install the skill (user-wide, or use `<repo>/.claude/skills/` for one project):
+It uses the library directly rather than calling the `expacc` binary. Project
+directories you add are stored in the browser. You can browse notes, run one
+claim or a file's claims (results appear in a modal), or Run all, which streams
+results file by file and ends with a summary. The note lifetime is stored as
+seconds in `explore-lifetime` in `live-docs/.live-docs-config.json`; the page
+accepts seconds or days.
 
-```sh
-mkdir -p ~/.claude/skills/expacc
-cp skills/expacc/SKILL.md ~/.claude/skills/expacc/SKILL.md
-```
+## Claude Code setup
 
-Then add a line to the installed `SKILL.md`, under the `# expacc` heading, giving the absolute path to the binary (`readlink -f $(which expacc)` or `~/.nix-profile/bin/expacc` expanded), so the agent can call it:
+[agents/AcceleratedExplore.md](agents/AcceleratedExplore.md) is a subagent
+that works like the built-in Explore agent but keeps its answer. It checks
+prior notes in `live-docs/explore/` with `expacc`, investigates only the gaps,
+writes `live-docs/explore/<slug>.md` and sends the parent that path straight
+away. It then records and checks a claims file in the background (the note is
+never edited afterwards) and replies with just the path. It runs on Haiku with
+the `expacc` skill preloaded.
 
-```
-The path to executable is /home/<you>/.nix-profile/bin/expacc
-```
+1. Install expacc (see [Install](#install)) and make sure `~/.nix-profile/bin`
+   is on your `PATH`; the skill and agent call `expacc` by name.
+2. Install the skill and the agent, user-wide or per project
+   (`<repo>/.claude/skills/`, `<repo>/.claude/agents/`):
 
-Install the agent:
+   ```sh
+   mkdir -p ~/.claude/skills/expacc ~/.claude/agents
+   cp skills/expacc/SKILL.md skills/expacc/keeping-live-docs-up-to-date.md ~/.claude/skills/expacc/
+   cp agents/AcceleratedExplore.md ~/.claude/agents/
+   ```
 
-```sh
-mkdir -p ~/.claude/agents          # or <repo>/.claude/agents for one project
-cp agents/AcceleratedExplore.md ~/.claude/agents/
-```
+3. Restart Claude Code.
 
-Restart Claude Code so it picks up the agent and skill.
-
-### 3. Use it
-
-Ask Claude to explore with the AcceleratedExplore agent. The prompt must start
-with a slug line, then the question and the breadth (`medium` or `very thorough`):
+To use it, ask Claude to explore with the AcceleratedExplore agent. The prompt
+must start with a slug line, then the question and the breadth (`medium` or
+`very thorough`):
 
 ```
 SLUG: logging-systems-overview-and-config
 Where is logging configured? Breadth: medium
 ```
 
-The agent works from the repo root and creates `live-docs/explore/` files
-there, so run it in the repo you want explored.
+The agent writes under `live-docs/explore/` in the current repo, so run it in
+the repo you want explored.
+
+## Development
+
+```sh
+nix-build        # build both executables and run the test suite
+nix-shell        # GHC with all dependencies, ripgrep, and the built expacc/live-docs-web
+```
+
+The tests shell out to `rg`, so it must be on `PATH` when running them outside
+`nix-build`.
+
+Code layout: `app/` is the CLI, `src/` the library (claims, record, prune),
+`web/` the web UI, `test/` the test suite.

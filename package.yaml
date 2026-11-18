@@ -6,6 +6,7 @@ extra-source-files:
 - web/static/app.css
 - web/static/app.js
 - web/static/marked.min.js
+- web/static/claims.css
 
 language: GHC2021
 

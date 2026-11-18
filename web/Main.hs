@@ -19,15 +19,23 @@ import qualified Data.Text as T
 import LiveDocs.Config (daysToSeconds, writeExploreLifetime)
 import Lucid
 import Network.HTTP.Types.Status (status400)
-import Network.Wai.Handler.Warp (defaultSettings, setHost, setPort)
+import Network.Wai.Handler.Warp (defaultSettings, setHost, setPort, setTimeout)
 import Scan (readLiveFile, scanRoots, validAbsolute)
 import System.Directory (doesDirectoryExist, getCurrentDirectory, setCurrentDirectory)
 import System.FilePath ((</>))
 import Web.Scotty
-import Claims (allTrue, checkRef, parseDepRef, renderResults, PrintMode (..))
+import Claims (allTrue, checkClaims, checkRef, listClaimsNames, parseDepRef, renderResults, PrintMode (..))
+import Claims.Name (ClaimsName (..))
+import Claims.Result (ClaimResult (..))
+import Data.Function (on)
+import Data.List (groupBy, sortOn)
+import Prune (scoreOf)
 
 appCss :: ByteString
 appCss = $(embedFile "web/static/app.css")
+
+claimsCss :: ByteString
+claimsCss = $(embedFile "web/static/claims.css")
 
 appJs :: ByteString
 appJs = $(embedFile "web/static/app.js")
@@ -38,7 +46,7 @@ markedJs = $(embedFile "web/static/marked.min.js")
 main :: IO ()
 main = do
   lock <- newMVar ()
-  let settings = setHost "127.0.0.1" (setPort 3090 defaultSettings)
+  let settings = setHost "127.0.0.1" (setPort 3090 (setTimeout 0 defaultSettings))
   scottyOpts (Options 0 settings) (routes lock)
 
 routes :: MVar () -> ScottyM ()
@@ -70,6 +78,21 @@ routes lock = do
             else do
               rs <- liftIO (withProjectCwd lock rootPath (checkRef explore ref))
               json (object ["ok" .= allTrue rs, "text" .= renderResults PrintAll rs])
+  post "/api/check-all" $ jsonBody >>= \case
+    Left e -> bad e
+    Right (CheckAllReq root) -> case validAbsolute (cs root) of
+      Left e -> bad e
+      Right rootPath -> do
+        let explore = rootPath </> "live-docs" </> "explore"
+        exists <- liftIO (doesDirectoryExist explore)
+        if not exists
+          then bad "explore directory is missing"
+          else do
+            files <- liftIO $ withProjectCwd lock rootPath $ do
+              names <- listClaimsNames explore
+              rs <- checkClaims explore names
+              pure (fileScores names rs)
+            json (object ["files" .= map fileScoreJson files])
   post "/api/lifetime" $ jsonBody >>= \case
     Left e -> bad e
     Right req -> case lifetimeSeconds req of
@@ -117,6 +140,20 @@ lifetimeErrors =
   , "days must be > 0"
   ]
 
+fileScores :: [ClaimsName] -> [ClaimResult] -> [(ClaimsName, Int, Int, Maybe Int)]
+fileScores names rs =
+  let grouped = groupBy ((==) `on` resFile) (sortOn resFile rs)
+      own name = [r | g@(r0 : _) <- grouped, resFile r0 == name, r <- g]
+      score name =
+        let (t, n) = scoreOf (own name)
+            pct = if n == 0 then Nothing else Just (round (100 * fromIntegral t / fromIntegral n :: Double))
+         in (name, t, n, pct)
+   in map score names
+
+fileScoreJson :: (ClaimsName, Int, Int, Maybe Int) -> A.Value
+fileScoreJson (ClaimsName name, t, n, pct) =
+  object ["name" .= name, "true" .= t, "total" .= n, "pct" .= pct]
+
 bad :: Text -> ActionM ()
 bad msg = do
   status status400
@@ -132,6 +169,11 @@ newtype ScanReq = ScanReq [Text]
 
 instance A.FromJSON ScanReq where
   parseJSON = A.withObject "scan" $ \o -> ScanReq <$> o .: "roots"
+
+newtype CheckAllReq = CheckAllReq Text
+
+instance A.FromJSON CheckAllReq where
+  parseJSON = A.withObject "check-all" $ \o -> CheckAllReq <$> o .: "root"
 
 data CheckReq = CheckReq Text Text
 
@@ -186,6 +228,7 @@ page = doctypehtml_ $ do
     meta_ [name_ "viewport", content_ "width=device-width, initial-scale=1"]
     title_ "Live docs"
     style_ (cs appCss :: Text)
+    style_ (cs claimsCss :: Text)
   body_ $ do
     header_ [class_ "top"] $ do
       h1_ "Live docs"

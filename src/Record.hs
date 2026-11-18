@@ -43,7 +43,7 @@ type Rec = ExceptT Text IO
 -- | Runs the command; its stdout lines become the claim's @expect@.
 recorded :: NewClaim -> Rec Claim
 recorded NewClaim {..} =
-  Claim (ClaimId ncId) ncText ncCmd . Just <$> withExceptT failed (ExceptT (runCmd ncCmd))
+  Claim (ClaimId ncId) ncText ncCmd . Just <$> withExceptT failed (ExceptT (runCmd "." ncCmd))
   where
     failed = \case
       Rejected t -> t
@@ -165,7 +165,7 @@ fixLineShifts dryRun dir ref = runExceptT $ withClaimsLock dir name $ do
   forM_ only $ \(ClaimId i) ->
     unless (any picked (cfClaims cf)) $ throwE ("no claim " <> i <> " in " <> cs (claimsPath dir name))
   replayed <- liftIO . forM (cfClaims cf) $ \c ->
-    if picked c then (\(v, _, _, fixed) -> (c, Just (v, fixed))) <$> replayClaim c else pure (c, Nothing)
+    if picked c then (\(v, _, _, fixed) -> (c, Just (v, fixed))) <$> replayClaim "." c else pure (c, Nothing)
   let fixes = [(c, moved) | (_, Just (VFalse (Shifted moved), Just c)) <- replayed]
       verdictsOf = [v | (_, Just (v, _)) <- replayed]
   unless (dryRun || null fixes) $

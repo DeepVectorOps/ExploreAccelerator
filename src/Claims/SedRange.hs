@@ -23,6 +23,7 @@ import Data.Maybe (fromMaybe)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.FilePath ((</>))
 import Text.Read (readMaybe)
 
 -- | 'srScript' is the address as written (@36,41p@ or @36p@), without quotes.
@@ -76,10 +77,10 @@ shiftedRange cmd expect fileLines = do
   where
     tshow = T.pack . show
 
--- | 'shiftedRange' against the file as it is now, read from the current directory.
-sedShift :: Text -> [Text] -> IO (Maybe ([MovedLine], Text))
-sedShift cmd expect = case parseSedRange cmd of
+-- | 'shiftedRange' against the file as it is now, with a relative path read against @root@.
+sedShift :: FilePath -> Text -> [Text] -> IO (Maybe ([MovedLine], Text))
+sedShift root cmd expect = case parseSedRange cmd of
   Nothing -> pure Nothing
   Just sr -> do
-    ls <- (T.lines . cs <$> BS.readFile (cs (srFile sr))) `catch` \(_ :: IOException) -> pure []
+    ls <- (T.lines . cs <$> BS.readFile (root </> cs (srFile sr))) `catch` \(_ :: IOException) -> pure []
     pure (shiftedRange cmd expect ls)

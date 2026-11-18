@@ -3,6 +3,8 @@ module Claims.Check
   ( resolveExploreDir
   , checkClaims
   , checkRef
+  , checkClaimsIn
+  , checkRefIn
   , replayClaim
   , listClaimsNames
   , lintFile
@@ -34,15 +36,16 @@ resolveExploreDir = fromMaybe "./live-docs/explore" <$> lookupEnv "EXPACC_DIR"
 
 -- | Verdict, the command if it was run, its stdout if the run finished, and
 -- for a 'Shifted' claim the claim as it reads at the new line numbers: a new
--- @expect@ for @rg -n@, a new range in @cmd@ for @sed -n@.
-replayClaim :: Claim -> IO (Verdict, Maybe Text, Maybe [Text], Maybe Claim)
-replayClaim c = case claimExpect c of
+-- @expect@ for @rg -n@, a new range in @cmd@ for @sed -n@. The command runs
+-- in @root@ and relative paths resolve against it.
+replayClaim :: FilePath -> Claim -> IO (Verdict, Maybe Text, Maybe [Text], Maybe Claim)
+replayClaim root c = case claimExpect c of
   Nothing -> pure (VFalse NotRecorded, Nothing, Nothing, Nothing)
   Just ex ->
-    runCmd (claimCmd c) >>= \case
+    runCmd root (claimCmd c) >>= \case
       Left r -> pure (VFalse r, Just (claimCmd c), Nothing, Nothing)
       Right out -> do
-        moved <- if ex == out then pure Nothing else sedShift (claimCmd c) ex
+        moved <- if ex == out then pure Nothing else sedShift root (claimCmd c) ex
         let (v, fixed) = case (moved, compareOutput (claimCmd c) ex out) of
               (Just (m, cmd), _) -> (VFalse (Shifted m), Just c {claimCmd = cmd})
               (Nothing, v'@(VFalse (Shifted _))) -> (v', Just c {claimExpect = Just out})
@@ -99,24 +102,35 @@ notFound dir name = do
   pure ("no such claims file " <> cs (claimsPath dir name) <> " (claims files in " <> cs (claimsDir dir) <> ": " <> avail <> ")")
 
 data Env = Env
-  { envDir :: FilePath
+  { envRoot :: FilePath
+  , envDir :: FilePath
   , envClaims :: IORef (Set.Set (ClaimsName, ClaimId))
   , envFiles :: IORef (Set.Set ClaimsName)
   , envOut :: IORef [ClaimResult]
   }
 
--- | Checks the named files and, transitively, their dependencies.
+-- | Checks the named files and, transitively, their dependencies, running
+-- commands in the current directory.
 checkClaims :: FilePath -> [ClaimsName] -> IO [ClaimResult]
-checkClaims dir names = do
-  env <- Env dir <$> newIORef mempty <*> newIORef mempty <*> newIORef []
+checkClaims = checkClaimsIn "."
+
+-- | 'checkClaims' with commands run in project root @root@. Does not touch
+-- the process cwd, so concurrent checks of different roots are safe.
+checkClaimsIn :: FilePath -> FilePath -> [ClaimsName] -> IO [ClaimResult]
+checkClaimsIn root dir names = do
+  env <- Env root dir <$> newIORef mempty <*> newIORef mempty <*> newIORef []
   forM_ names $ visit env Target Nothing
   reverse <$> readIORef (envOut env)
 
 -- | One claims file, or one claim id. A single id still lints that file and
 -- follows its dependencies: 'visit' does both when @only@ is 'Just'.
 checkRef :: FilePath -> DepRef -> IO [ClaimResult]
-checkRef dir ref = do
-  env <- Env dir <$> newIORef mempty <*> newIORef mempty <*> newIORef []
+checkRef = checkRefIn "."
+
+-- | 'checkRef' with commands run in project root @root@.
+checkRefIn :: FilePath -> FilePath -> DepRef -> IO [ClaimResult]
+checkRefIn root dir ref = do
+  env <- Env root dir <$> newIORef mempty <*> newIORef mempty <*> newIORef []
   case ref of
     WholeFile name -> visit env Target Nothing name
     OneClaim name i -> visit env Target (Just i) name
@@ -130,7 +144,7 @@ visit env origin only name =
       let picked = [c | c <- cfClaims cf, maybe True (== claimId c) only]
       when (null picked) $ forM_ only $ \i -> emit i "" (VFalse (MissingDep "no such claim")) Nothing Nothing
       forM_ picked $ \c -> once (envClaims env) (name, claimId c) $
-        replayClaim c >>= \(v, cmd, out, _) -> emit (claimId c) (claimText c) v cmd out
+        replayClaim (envRoot env) c >>= \(v, cmd, out, _) -> emit (claimId c) (claimText c) v cmd out
       once (envFiles env) name $ do
         forM_ (cfProblems cf) $ \p -> emit (ClaimId "lint") "" (VFalse (Lint p)) Nothing Nothing
         forM_ (hDepends (cfHeader cf)) $ \case

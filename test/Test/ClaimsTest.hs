@@ -111,6 +111,10 @@ spec = describe "expacc replayable explore claims" $ do
           TIO.writeFile f body
           act d f
         run d ls = writeClaims d "t" ls >> checkClaims d [ClaimsName "t"]
+    it "checkClaimsIn runs commands and reads sed files relative to root" $ withData "x\nneedle one\nhay\n" $ \d _ -> do
+      writeClaims d "t" [rgClaim "a" "data.txt" (Just ["2:needle one"]), bashLine "b" "sed -n '1,2p' data.txt" (Just ["needle one", "hay"])]
+      rs <- checkClaimsIn d d [ClaimsName "t"]
+      verdicts rs `shouldBe` [("a", VTrue), ("b", VFalse (Shifted [MovedLine (Just "data.txt") 1 2 "needle one", MovedLine (Just "data.txt") 2 3 "hay"]))]
     it "true claim" $ withData "needle one\nhay\nneedle two\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["1:needle one", "3:needle two"])]
       verdicts rs `shouldBe` [("a", VTrue)]

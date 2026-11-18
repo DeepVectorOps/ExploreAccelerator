@@ -3,8 +3,6 @@
 -- | Local explorer for live-docs trees. Binds 127.0.0.1:3090 only.
 module Main (main) where
 
-import Control.Concurrent.MVar (MVar, newMVar, withMVar)
-import Control.Exception (finally)
 import Data.Aeson (eitherDecode, object, (.:), (.=))
 import Data.Aeson.Types (Parser, parseEither)
 import qualified Data.Aeson as A
@@ -19,11 +17,11 @@ import Lucid
 import Network.HTTP.Types.Status (status400, status404)
 import Network.Wai.Handler.Warp (defaultSettings, setHost, setPort, setTimeout)
 import Scan (readLiveFile, scanRoots, validAbsolute)
-import System.Directory (doesDirectoryExist, getCurrentDirectory, setCurrentDirectory)
+import System.Directory (doesDirectoryExist)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import Web.Scotty
-import Claims (allTrue, checkClaims, checkRef, listClaimsNames, parseDepRef, renderResults, PrintMode (..))
+import Claims (allTrue, checkClaimsIn, checkRefIn, listClaimsNames, parseDepRef, renderResults, PrintMode (..))
 import Claims.Name (ClaimsName (..))
 import Claims.Result (ClaimResult (..))
 import Data.Function (on)
@@ -32,13 +30,12 @@ import Prune (scoreOf)
 
 main :: IO ()
 main = do
-  lock <- newMVar ()
   staticDir <- maybe "web/static" id <$> lookupEnv "LIVE_DOCS_STATIC"
   let settings = setHost "127.0.0.1" (setPort 3090 (setTimeout 0 defaultSettings))
-  scottyOpts (Options 0 settings) (routes staticDir lock)
+  scottyOpts (Options 0 settings) (routes staticDir)
 
-routes :: FilePath -> MVar () -> ScottyM ()
-routes staticDir lock = do
+routes :: FilePath -> ScottyM ()
+routes staticDir = do
   get "/" $ html $ renderText page
   get "/static/:file" $ do
     file <- pathParam "file" :: ActionM Text
@@ -75,7 +72,7 @@ routes staticDir lock = do
           if not exists
             then bad "explore directory is missing"
             else do
-              rs <- liftIO (withProjectCwd lock rootPath (checkRef explore ref))
+              rs <- liftIO (checkRefIn rootPath explore ref)
               json (object ["ok" .= allTrue rs, "text" .= renderResults PrintAll rs])
   post "/api/check-all" $ jsonBody >>= \case
     Left e -> bad e
@@ -87,11 +84,30 @@ routes staticDir lock = do
         if not exists
           then bad "explore directory is missing"
           else do
-            files <- liftIO $ withProjectCwd lock rootPath $ do
+            files <- liftIO $ do
               names <- listClaimsNames explore
-              rs <- checkClaims explore names
+              rs <- checkClaimsIn rootPath explore names
               pure (fileScores names rs)
             json (object ["files" .= map fileScoreJson files])
+  post "/api/check-file" $ jsonBody >>= \case
+    Left e -> bad e
+    Right (CheckReq root name) -> case validAbsolute (cs root) of
+      Left e -> bad e
+      Right rootPath -> do
+        let explore = rootPath </> "live-docs" </> "explore"
+        exists <- liftIO (doesDirectoryExist explore)
+        if not exists
+          then bad "explore directory is missing"
+          else do
+            names <- liftIO (listClaimsNames explore)
+            let wanted = ClaimsName name
+            if wanted `notElem` names
+              then bad "unknown claims file"
+              else do
+                rs <- liftIO (checkClaimsIn rootPath explore [wanted])
+                case fileScores [wanted] rs of
+                  [score] -> json (fileScoreJson score)
+                  _ -> bad "check failed"
   post "/api/lifetime" $ jsonBody >>= \case
     Left e -> bad e
     Right req -> case lifetimeSeconds req of
@@ -157,12 +173,6 @@ bad :: Text -> ActionM ()
 bad msg = do
   status status400
   json (object ["error" .= msg])
-
-withProjectCwd :: MVar () -> FilePath -> IO a -> IO a
-withProjectCwd lock dir act = withMVar lock $ \_ -> do
-  old <- getCurrentDirectory
-  setCurrentDirectory dir
-  act `finally` setCurrentDirectory old
 
 newtype ScanReq = ScanReq [Text]
 

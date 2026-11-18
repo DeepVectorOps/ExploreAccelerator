@@ -232,7 +232,7 @@ page = doctypehtml_ $ do
   body_ $ do
     header_ [class_ "top"] $ do
       h1_ "Live docs"
-      button_ [id_ "dir-toggle", type_ "button", makeAttribute "aria-expanded" "false"] "Add directory"
+      button_ [id_ "dir-toggle", type_ "button"] "Add directory"
     div_ [class_ "dir-panel", hidden_ "hidden"] $ do
       div_ [class_ "dir-add"] $ do
         input_ [id_ "root-input", type_ "text", placeholder_ "/absolute/path"]

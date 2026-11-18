@@ -75,7 +75,7 @@ expacc lint NAME...
 
 - Run from the root of the repo the claims describe.
 - Use `expacc check NAME... --print-all`, not plain `check`. Each shown claim prints the command that ran and the output it printed, one prefix per line (`command: ...`, `output: ...`; a bare `output:` means it printed nothing). `--print-false` is the flag default and shows only failing claims; `--print-true` shows only passing claims. Prefer `--print-all`.
-- `--minimal-output` prints only the summary (`OK: N true, M false` or `FAILED: N true, M false`) and, for each false claim, `FALSE file#id` plus the command that failed. No diffs, no stdout.
+- `--minimal-output` prints only the summary (`OK: N true, M false` or `FAILED: N true, M false`, plus `, K drifted` when any; shown at the top and the bottom) and, for each false claim, `FALSE file#id` (or `DRIFTED file#id`) plus the command that failed. No diffs, no stdout.
 - The last line is `OK: N true, 0 false` or `FAILED: N true, M false`. Exit code: `0` all true including dependencies, `1` any false, `2` bad usage.
 - `lint` reports file problems without running any command; `check` reports them too.
 
@@ -93,7 +93,7 @@ expacc fix-line-shift [NAME...] [--dry-run]
 
 - `output differs`: the diff shows expected against actual.
   For `rg -n` output the diff is on blocks: a `path:START-END` header, then the lines indented, so a move shows as a changed header and only edited lines show as `-`/`+`.
-- `same lines, line numbers moved by +N (fix-line-shift to update)`: the lines are unchanged but moved in the file. The diff shows only the old and new positions. Run `expacc fix-line-shift NAME`. If the claim text or your note cites those line numbers, fix them too. Detected for `rg -n` output and for a command that is just `sed -n 'A,Bp' FILE`.
+- `DRIFTED ... same lines, line numbers moved by +N`: the lines are unchanged but moved in the file. Instead of `output:` lines it prints one row per output line, `path  OLD -> NEW  text`, under a `(command output was transformed: ...)` note. The summary counts these as `drifted`, separate from `false`. Run `expacc fix-line-shift NAME`. If the claim text or your note cites those line numbers, fix them too. Detected for `rg -n` output and for a command that is just `sed -n 'A,Bp' FILE`.
 - `same lines, different order`: an `rg` in the command has no `--sort path`. Add it to every `rg`, edit `cmd` in your own claims file, then `record-fix` the claim.
 - `no expect recorded`: the claim has no `expect`.
 - `rejected`: empty command.

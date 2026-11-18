@@ -121,7 +121,7 @@ spec = describe "expacc replayable explore claims" $ do
         other -> expectationFailure (show other)
     it "line-number drift in rg -n output is Shifted" $ withData "needle one\nhay\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["99:needle one"])]
-      verdicts rs `shouldBe` [("a", VFalse (Shifted [("line 99", "line 1", -98)]))]
+      verdicts rs `shouldBe` [("a", VFalse (Shifted [MovedLine Nothing 99 1 "needle one"]))]
     it "line-number drift without rg -n is a Mismatch" $ withData "needle one\nhay\n" $ \d f -> do
       rs <- run d [bashLine "a" ("grep -n needle " <> cs f) (Just ["99:needle one"])]
       verdicts rs `shouldBe` [("a", VFalse (Mismatch ["99:needle one"] ["1:needle one"]))]
@@ -139,11 +139,26 @@ spec = describe "expacc replayable explore claims" $ do
       let cmd = "cd " <> cs d <> " && rg --sort path -n -A2 loginFunction src"
           ex = ["src/a.hs:1:loginFunction = 1", "src/a.hs-2-ctx1", "src/a.hs-3-ctx2", "--", "src/b.hs:1:loginFunction = 2", "src/b.hs-2-b1"]
       rs <- run d [bashLine "a" cmd (Just ex)]
-      verdicts rs `shouldBe` [("a", VFalse (Shifted [("src/a.hs:1-3", "src/a.hs:4-6", 3)]))]
+      verdicts rs `shouldBe`
+        [ ( "a"
+          , VFalse
+              ( Shifted
+                  [ MovedLine (Just "src/a.hs") 1 4 "loginFunction = 1"
+                  , MovedLine (Just "src/a.hs") 2 5 "ctx1"
+                  , MovedLine (Just "src/a.hs") 3 6 "ctx2"
+                  , MovedLine (Just "src/b.hs") 1 1 "loginFunction = 2"
+                  , MovedLine (Just "src/b.hs") 2 2 "b1"
+                  ]
+              )
+          )
+        ]
       let txt = renderResults PrintFalse rs
-      txt `shouldSatisfy` T.isInfixOf "same lines, line numbers moved by +3 (fix-line-shift to update)"
-      txt `shouldSatisfy` T.isInfixOf "    - src/a.hs:1-3\n    + src/a.hs:4-6\n"
-      txt `shouldSatisfy` (not . T.isInfixOf "    - src/b.hs")
+      txt `shouldSatisfy` T.isInfixOf "DRIFTED t#a  -- same lines, line numbers moved by +3 (expacc fix-line-shift t to update)\nclaim: "
+      txt `shouldSatisfy` T.isInfixOf "output (command output was transformed: one row per line, old -> new line number):\n"
+      txt `shouldSatisfy` T.isInfixOf "    src/a.hs  1 -> 4  loginFunction = 1\n"
+      txt `shouldSatisfy` T.isInfixOf "    src/b.hs       1  loginFunction = 2\n"
+      txt `shouldSatisfy` (not . T.isInfixOf "output: ")
+      txt `shouldSatisfy` T.isPrefixOf "FAILED: 0 true, 0 false, 1 drifted\n"
     it "shift plus one changed line shows only the header and that line" $ withTmp $ \d -> do
       createDirectoryIfMissing True (d </> "src")
       TIO.writeFile (d </> "src" </> "a.hs") "x\nx\nloginFunction = 1\nl2\nl3 changed\nl4\nl5\n"
@@ -157,7 +172,7 @@ spec = describe "expacc replayable explore claims" $ do
     it "a different total offset per block lists each offset" $ do
       let v = compareOutput "rg -n x src"
             ["src/a.hs:1:x", "src/b.hs:10:x"] ["src/a.hs:3:x", "src/b.hs:5:x"]
-      v `shouldBe` VFalse (Shifted [("src/a.hs:1", "src/a.hs:3", 2), ("src/b.hs:10", "src/b.hs:5", -5)])
+      v `shouldBe` VFalse (Shifted [MovedLine (Just "src/a.hs") 1 3 "x", MovedLine (Just "src/b.hs") 10 5 "x"])
       renderResults PrintFalse [ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target v Nothing Nothing]
         `shouldSatisfy` T.isInfixOf "line numbers moved (+2, -5)"
     it "one rg line whose text holds :N: or -N- splits at the real path" $ do
@@ -384,7 +399,7 @@ spec = describe "expacc replayable explore claims" $ do
     it "a sed -n range whose lines moved is Shifted" $ withData $ \d f -> do
       writeClaims d "s" [sedLine "a" "1,2p" f (Just ["needle one", "hay"])]
       rs <- checkClaims d [ClaimsName "s"]
-      verdicts rs `shouldBe` [("a", VFalse (Shifted [(cs f <> ":1-2", cs f <> ":2-3", 1)]))]
+      verdicts rs `shouldBe` [("a", VFalse (Shifted [MovedLine (Just (cs f)) 1 2 "needle one", MovedLine (Just (cs f)) 2 3 "hay"]))]
     it "sed -n lines that are gone, or found twice, are a Mismatch" $ withData $ \d f -> do
       TIO.writeFile f "x\ndup\ndup\n"
       writeClaims d "s" [sedLine "gone" "1p" f (Just ["needle one"]), sedLine "twice" "1p" f (Just ["dup"])]
@@ -412,7 +427,7 @@ spec = describe "expacc replayable explore claims" $ do
       Right done <- fix False d
       (sfTrue done, sfFalse done) `shouldBe` (1, 1)
       sfShifted done `shouldBe` sfShifted dry
-      head (sfShifted done) `shouldBe` ["shifted s#rg  by +1", "    - line 1", "    + line 2", "    - line 3", "    + line 4"]
+      head (sfShifted done) `shouldBe` ["shifted s#rg  by +1", "output (command output was transformed: one row per line, old -> new line number):", "    1 -> 2  needle one", "    3 -> 4  needle two"]
       after <- stored d
       take 3 after
         `shouldBe` [ (rgCmd, Just ["2:needle one", "4:needle two"])
@@ -444,7 +459,7 @@ spec = describe "expacc replayable explore claims" $ do
       txt `shouldSatisfy` (not . T.isInfixOf "gone")
       txt `shouldSatisfy` T.isInfixOf "FALSE g#d1 (dep)\ncommand: rg -n needle src\n"
       txt `shouldSatisfy` T.isInfixOf "FAILED: 1 true, 1 false"
-      renderResults PrintMinimal [t] `shouldBe` "OK: 1 true, 0 false\n"
+      renderResults PrintMinimal [t] `shouldBe` "OK: 1 true, 0 false\n\nOK: 1 true, 0 false\n"
     it "PrintFalse hides TRUE rows" $ do
       out PrintFalse `shouldSatisfy` (not . T.isInfixOf "TRUE")
       out PrintFalse `shouldSatisfy` T.isInfixOf "FALSE g#d1 (dep)"

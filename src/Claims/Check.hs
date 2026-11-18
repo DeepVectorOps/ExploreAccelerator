@@ -44,7 +44,7 @@ replayClaim c = case claimExpect c of
       Right out -> do
         moved <- if ex == out then pure Nothing else sedShift (claimCmd c) ex
         let (v, fixed) = case (moved, compareOutput (claimCmd c) ex out) of
-              (Just (m, cmd), _) -> (VFalse (Shifted [m]), Just c {claimCmd = cmd})
+              (Just (m, cmd), _) -> (VFalse (Shifted m), Just c {claimCmd = cmd})
               (Nothing, v'@(VFalse (Shifted _))) -> (v', Just c {claimExpect = Just out})
               (Nothing, v') -> (v', Nothing)
         pure (v, Just (claimCmd c), Just out, fixed)
@@ -58,8 +58,8 @@ compareOutput cmd e a
   | sort e == sort a = VFalse (Reordered e a)
   | Just be <- grouped e
   , Just ba <- grouped a =
-      let moved = [(blockHeader x, blockHeader y, bStart y - bStart x) | (x, y) <- zip be ba, bStart x /= bStart y]
-       in if map content be == map content ba && not (null moved)
+      let moved = [MovedLine (bFile y) (bStart x + k) (bStart y + k) t | (x, y) <- zip be ba, (k, t) <- zip [0 ..] (bBody y)]
+       in if map content be == map content ba && any (\m -> mlOld m /= mlNew m) moved
             then VFalse (Shifted moved)
             else VFalse (RgMismatch (renderBlocks be) (renderBlocks ba))
   | otherwise = VFalse (Mismatch e a)

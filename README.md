@@ -46,17 +46,21 @@ file list without removing anything. The summary is still `N deleted`.
 and `--print-all` show passing / all claims. Each shown claim also prints the
 command that ran and its stdout, prefixed `command:` and `output:`.
 `--minimal-output` prints only the summary totals, and for each false claim
-`FALSE file#id` and the command that failed. Exit code:
+`FALSE file#id` (or `DRIFTED file#id`) and the command that failed. The summary
+line (`OK: N true, M false`, plus `, K drifted` when any) is printed first and last. Exit code:
 `0` all true, `1` any false, `2` bad usage.
 
 When the command runs `rg` with line numbers (`-n`, `--line-number`, `-nA5`,
 ...) and every output line parses as rg's `path:N:text` / `path-N-text` /
 `N:text` / `--` format, lines are grouped into blocks of consecutive lines
 (`path:START-END` plus the text). If only the numbers changed, the claim is
-FALSE with `same lines, line numbers moved by +N (fix-line-shift to update)` and
-the diff shows just the old and new headers; otherwise the diff is on the
-grouped blocks, so only headers and changed lines show as `-`/`+`. The
-recorded `expect` and the `output:` trace stay raw rg output.
+`DRIFTED` (not FALSE) with `same lines, line numbers moved by +N (expacc
+fix-line-shift NAME to update)`, then `claim:`, `command:` and one aligned row per
+output line, `path  OLD -> NEW  text` (an unmoved line shows only its number), in
+place of the `output:` trace. Otherwise the diff is on the grouped blocks, so only
+headers and changed lines show as `-`/`+`. Whenever output is shown transformed
+like this, the section says `(command output was transformed: ...)`. The recorded
+`expect` stays raw rg output.
 
 A command that is just `sed -n 'A,Bp' FILE` gets the same verdict when its
 expected lines sit, unchanged, at exactly one other place in the file.
@@ -65,6 +69,8 @@ in `cmd` for sed) and prints what moved; with no NAME it covers every claims
 file. See [skills/expacc/keeping-live-docs-up-to-date.md](skills/expacc/keeping-live-docs-up-to-date.md).
 
 ```
+FAILED: 1 true, 1 false
+
 TRUE  auth-flow#login-handler  Login is handled in src/auth.js
 command: rg -n handleLogin src
 output: src/auth.js:42:export async function handleLogin(req, res) {
@@ -75,7 +81,7 @@ output: src/auth.js:const TTL = 7200;
     - src/auth.js:const TTL = 3600;
     + src/auth.js:const TTL = 7200;
 
-1 true, 1 false
+FAILED: 1 true, 1 false
 ```
 
 ## Web explorer

@@ -12,7 +12,7 @@ module Claims.SedRange
   , sedShift
   ) where
 
-import Claims.RgGroup (Block (..), blockHeader)
+import Claims.Result (MovedLine (..))
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, catch)
 import Control.Monad (guard)
@@ -55,8 +55,8 @@ parseSedRange cmd = case T.words cmd of
     plain c = isAlphaNum c || c `elem` ("/._-+" :: String)
 
 -- | The expected lines sit, unchanged, at exactly one other place in the
--- file: (old header, new header, offset) and the command with the new range.
-shiftedRange :: Text -> [Text] -> [Text] -> Maybe ((Text, Text, Int), Text)
+-- file: one row per line and the command with the new range.
+shiftedRange :: Text -> [Text] -> [Text] -> Maybe ([MovedLine], Text)
 shiftedRange cmd expect fileLines = do
   sr <- parseSedRange cmd
   guard (not (null expect))
@@ -69,16 +69,15 @@ shiftedRange cmd expect fileLines = do
         | otherwise = tshow start <> "p"
       -- The script is the first place its text can occur: @sed -n@ holds no digit.
       (before, after) = T.breakOn (srScript sr) cmd
-      header a b = blockHeader (Block (Just (srFile sr)) a b [])
   Just
-    ( (header (srStart sr) (srEnd sr), header start end, start - srStart sr)
+    ( [MovedLine (Just (srFile sr)) (srStart sr + k) (start + k) t | (k, t) <- zip [0 ..] expect]
     , before <> script <> T.drop (T.length (srScript sr)) after
     )
   where
     tshow = T.pack . show
 
 -- | 'shiftedRange' against the file as it is now, read from the current directory.
-sedShift :: Text -> [Text] -> IO (Maybe ((Text, Text, Int), Text))
+sedShift :: Text -> [Text] -> IO (Maybe ([MovedLine], Text))
 sedShift cmd expect = case parseSedRange cmd of
   Nothing -> pure Nothing
   Just sr -> do

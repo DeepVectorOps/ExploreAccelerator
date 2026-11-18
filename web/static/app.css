@@ -353,3 +353,48 @@ pre {
     grid-template-rows: minmax(8rem, 16rem) minmax(0, 1fr);
   }
 }
+
+.check-dialog {
+  width: min(64rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 4rem);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: #171a22;
+  color: #e7e9ee;
+  border: 1px solid #34384a;
+  border-radius: 10px;
+}
+
+.check-dialog:not([open]) {
+  display: none;
+}
+
+.check-dialog::backdrop {
+  background: rgb(0 0 0 / .55);
+}
+
+.check-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .6rem .8rem;
+  border-bottom: 1px solid #34384a;
+}
+
+.check-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.check-dialog pre {
+  margin: 0;
+  border-radius: 0 0 10px 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  white-space: pre;
+  overflow: auto;
+}

@@ -512,37 +512,71 @@ function fillClaims(p, claimFile, pane) {
   hr.append(th('Run'), th('Id'), th('Text'));
   head.append(hr);
   const body = document.createElement('tbody');
-  const pre = document.createElement('pre');
-  pre.className = 'check';
-  body.append(claimRow(p, claimFile.name, claimFile.name, '', pre));
+  body.append(claimRow(p, claimFile.name, claimFile.name, ''));
   (claimFile.claims || []).forEach(cl => {
-    body.append(claimRow(p, claimFile.name + '#' + cl.id, cl.id, cl.text || '', pre));
+    body.append(claimRow(p, claimFile.name + '#' + cl.id, cl.id, cl.text || ''));
   });
   table.append(head, body);
-  pane.append(heading, table, pre);
+  pane.append(heading, table);
 }
 
-function claimRow(p, name, id, text, pre) {
+function claimRow(p, name, id, text) {
   const tr = document.createElement('tr');
   const runCell = document.createElement('td');
   const run = document.createElement('button');
   run.type = 'button';
   run.textContent = 'Run';
-  run.addEventListener('click', () => runCheck(p, name, pre));
+  run.addEventListener('click', () => runCheck(p, name));
   runCell.append(run);
   tr.append(runCell, td(id), td(text));
   return tr;
 }
 
-async function runCheck(p, name, pre) {
+let checkDialog = null;
+
+function openCheckDialog(name) {
+  if (!checkDialog) {
+    checkDialog = document.createElement('dialog');
+    checkDialog.className = 'check-dialog';
+    const header = document.createElement('div');
+    header.className = 'check-head';
+    const title = document.createElement('h2');
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => checkDialog.close());
+    header.append(title, close);
+    const pre = document.createElement('pre');
+    checkDialog.append(header, pre);
+    // A click on the backdrop lands on the dialog element itself.
+    checkDialog.addEventListener('click', ev => {
+      if (ev.target === checkDialog) checkDialog.close();
+    });
+    document.body.append(checkDialog);
+  }
+  checkDialog.querySelector('h2').textContent = name;
+  const pre = checkDialog.querySelector('pre');
   pre.textContent = 'Running…';
-  const res = await fetch('/api/check', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({root: p.root, name})
-  });
-  const data = await res.json();
-  pre.textContent = data.text || data.error || '';
+  if (!checkDialog.open) checkDialog.showModal();
+  return pre;
+}
+
+let checkSeq = 0;
+
+async function runCheck(p, name) {
+  const pre = openCheckDialog(name);
+  const seq = ++checkSeq;
+  try {
+    const res = await fetch('/api/check', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({root: p.root, name})
+    });
+    const data = await res.json();
+    if (seq === checkSeq) pre.textContent = data.text || data.error || '';
+  } catch (e) {
+    if (seq === checkSeq) pre.textContent = 'check failed';
+  }
 }
 
 async function runAll(p, btn, err) {
@@ -586,7 +620,7 @@ document.addEventListener('click', ev => {
   setDirPanel(false);
 });
 document.addEventListener('keydown', ev => {
-  if (ev.key === 'Escape') setDirPanel(false);
+  if (ev.key === 'Escape' && !(checkDialog && checkDialog.open)) setDirPanel(false);
 });
 $('add-root').addEventListener('click', () => {
   const v = $('root-input').value.trim();

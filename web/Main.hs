@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | Local explorer for live-docs trees. Binds 127.0.0.1:3090 only.
 module Main (main) where
@@ -10,18 +9,18 @@ import Data.Aeson (eitherDecode, object, (.:), (.=))
 import Data.Aeson.Types (Parser, parseEither)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.KeyMap as KM
-import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LBS
-import Data.FileEmbed (embedFile)
 import Data.String.Conversions (cs)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as LT
 import LiveDocs.Config (daysToSeconds, writeExploreLifetime)
 import Lucid
-import Network.HTTP.Types.Status (status400)
+import Network.HTTP.Types.Status (status400, status404)
 import Network.Wai.Handler.Warp (defaultSettings, setHost, setPort, setTimeout)
 import Scan (readLiveFile, scanRoots, validAbsolute)
 import System.Directory (doesDirectoryExist, getCurrentDirectory, setCurrentDirectory)
+import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import Web.Scotty
 import Claims (allTrue, checkClaims, checkRef, listClaimsNames, parseDepRef, renderResults, PrintMode (..))
@@ -31,27 +30,27 @@ import Data.Function (on)
 import Data.List (groupBy, sortOn)
 import Prune (scoreOf)
 
-appCss :: ByteString
-appCss = $(embedFile "web/static/app.css")
-
-claimsCss :: ByteString
-claimsCss = $(embedFile "web/static/claims.css")
-
-appJs :: ByteString
-appJs = $(embedFile "web/static/app.js")
-
-markedJs :: ByteString
-markedJs = $(embedFile "web/static/marked.min.js")
-
 main :: IO ()
 main = do
   lock <- newMVar ()
+  staticDir <- maybe "web/static" id <$> lookupEnv "LIVE_DOCS_STATIC"
   let settings = setHost "127.0.0.1" (setPort 3090 (setTimeout 0 defaultSettings))
-  scottyOpts (Options 0 settings) (routes lock)
+  scottyOpts (Options 0 settings) (routes staticDir lock)
 
-routes :: MVar () -> ScottyM ()
-routes lock = do
+routes :: FilePath -> MVar () -> ScottyM ()
+routes staticDir lock = do
   get "/" $ html $ renderText page
+  get "/static/:file" $ do
+    file <- pathParam "file" :: ActionM Text
+    case lookup file staticFiles of
+      Nothing -> do
+        status status404
+        json (object ["error" .= ("unknown static file" :: Text)])
+      Just contentType -> do
+        bs <- liftIO (LBS.readFile (staticDir </> cs file))
+        setHeader "Content-Type" contentType
+        setHeader "Cache-Control" "no-cache"
+        raw bs
   post "/api/scan" $ jsonBody >>= \case
     Left e -> bad e
     Right (ScanReq roots) -> liftIO (scanRoots roots) >>= json
@@ -221,14 +220,24 @@ lifetimeSeconds LifetimeReq{lifeRoot, lifeAmount, lifeUnit} = do
     Days -> daysToSeconds lifeAmount
   if T.null lifeRoot then Left "missing root" else Right secs
 
+-- | Served from the static dir on every request, so edits show without a
+-- restart. Only these names are served, which rules out path traversal.
+staticFiles :: [(Text, LT.Text)]
+staticFiles =
+  [ ("app.css", "text/css; charset=utf-8")
+  , ("claims.css", "text/css; charset=utf-8")
+  , ("app.js", "text/javascript; charset=utf-8")
+  , ("marked.min.js", "text/javascript; charset=utf-8")
+  ]
+
 page :: Html ()
 page = doctypehtml_ $ do
   head_ $ do
     meta_ [charset_ "utf-8"]
     meta_ [name_ "viewport", content_ "width=device-width, initial-scale=1"]
     title_ "Live docs"
-    style_ (cs appCss :: Text)
-    style_ (cs claimsCss :: Text)
+    link_ [rel_ "stylesheet", href_ "/static/app.css"]
+    link_ [rel_ "stylesheet", href_ "/static/claims.css"]
   body_ $ do
     header_ [class_ "top"] $ do
       h1_ "Live docs"
@@ -242,5 +251,5 @@ page = doctypehtml_ $ do
       main_ [class_ "explorer"] $ do
         div_ [id_ "projects"] ""
         div_ [id_ "workspace"] ""
-    script_ (cs markedJs :: Text)
-    script_ (cs appJs :: Text)
+    script_ [src_ "/static/marked.min.js"] ("" :: Text)
+    script_ [src_ "/static/app.js"] ("" :: Text)

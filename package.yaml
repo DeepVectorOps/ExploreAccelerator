@@ -2,12 +2,6 @@ name: explore-accelerator
 version: 0.1.0.0
 synopsis: Replayable explore claims checker (expacc)
 
-extra-source-files:
-- web/static/app.css
-- web/static/app.js
-- web/static/marked.min.js
-- web/static/claims.css
-
 language: GHC2021
 
 default-extensions:
@@ -58,7 +52,6 @@ executables:
     - text
     - time
     - http-types
-    - file-embed
     ghc-options:
     - -threaded
     - -Wno-x-partial

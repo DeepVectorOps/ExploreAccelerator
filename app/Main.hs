@@ -20,14 +20,14 @@ import System.IO (stderr)
 usage :: Text
 usage =
   T.unlines
-    [ "usage: expacc check NAME... [--print-all | --print-true | --print-false | --minimal-output]"
-    , "       shown claims print command: and output: lines"
+    [ "usage: expacc check NAME... [--print-all | --print-true | --print-false | --minimal-output] [--moved-lines-jsonl]"
+    , "       shown claims print command: and output: lines; drifted claims also print a per-file line map"
     , "       --minimal-output prints only the totals, plus FALSE id and command of each false claim"
     , "       expacc lint NAME..."
     , "       expacc record NAME --id ID --text TEXT [--doc D] [--commit C] [--depends DEP]... -- CMD"
     , "       expacc record-append NAME --id ID --text TEXT -- CMD"
     , "       expacc record-fix NAME ID"
-    , "       expacc fix-line-shift [NAME...] [--dry-run]"
+    , "       expacc fix-line-shift [NAME...] [--dry-run] [--moved-lines-jsonl]"
     , "       expacc prune [--dry-run] [--delete-if-older DUR] [--delete-if-inaccurate RATIO] [--delete-if-missing-claim]"
     , "CMD is a bash string, run with bash -c; pipes and redirects work. Quote it as one argument."
     , "NAME is a slug (other, or other#id for one claim), resolved in $EXPACC_DIR/claims"
@@ -36,6 +36,8 @@ usage =
     , "record-fix re-runs a claim and rewrites its expected output."
     , "fix-line-shift updates the claims whose lines only moved in their file (rg -n output,"
     , "sed -n 'A,Bp' FILE ranges) and prints what moved; no NAME means every claims file."
+    , "--moved-lines-jsonl prints instead one JSON object per line of each drifted claim:"
+    , "{\"path\", \"old\", \"new\", \"claim\", \"text\"} (path null when unknown); exit status is unchanged."
     , "prune deletes docs (and their claims) that are older than DUR (7d, 1h, 30m, 45s) AND"
     , "have a true-claim ratio below RATIO, or that have no claims file."
     , "--delete-if-older also filters --delete-if-missing-claim when both are given."
@@ -137,11 +139,15 @@ main = do
   case args of
     "check" : rest
       | (flags, names@(_ : _)) <- partition ("--" `T.isPrefixOf`) rest
-      , Just modes <- mapM (`lookup` printFlags) flags -> do
+      , (jsonl, flags') <- partition (== "--moved-lines-jsonl") flags
+      , Just modes <- mapM (`lookup` printFlags) flags' -> do
           requireExploreDir dir
           parsed <- traverse requireName names
           results <- checkClaims dir parsed
-          TIO.putStr (renderResults (last (PrintFalse : modes)) results)
+          TIO.putStr $
+            if null jsonl
+              then renderResults (last (PrintFalse : modes)) results
+              else T.unlines (movedLinesJsonl (driftedLines results))
           exitWith (if allTrue results then ExitSuccess else ExitFailure 1)
     "lint" : names@(_ : _) -> do
       requireExploreDir dir
@@ -160,14 +166,19 @@ main = do
     ["record-fix", name, cid] -> requireName name >>= \n -> recordFix dir n cid >>= finish
     "fix-line-shift" : rest
       | (flags, names) <- partition ("--" `T.isPrefixOf`) rest
-      , all (== "--dry-run") flags -> do
+      , all (`elem` ["--dry-run", "--moved-lines-jsonl"]) flags -> do
           requireExploreDir dir
           refs <- if null names then map WholeFile <$> listClaimsNames dir else traverse (either usageError pure . parseDepRef) names
-          (errs, fixes) <- partitionEithers <$> mapM (fixLineShifts (not (null flags)) dir) refs
-          let ShiftFixes shifted true false = mconcat fixes
-              count = cs (show (length shifted)) <> " shifted claims " <> (if null flags then "fixed" else "would be fixed (dry run)")
+          let dry = "--dry-run" `elem` flags
+          (errs, fixes) <- partitionEithers <$> mapM (fixLineShifts dry dir) refs
+          let ShiftFixes shifted moved true false = mconcat fixes
+              count = cs (show (length shifted)) <> " shifted claims " <> (if dry then "would be fixed (dry run)" else "fixed")
               summary = count <> ", " <> cs (show false) <> " still false, " <> cs (show true) <> " true"
-          TIO.putStr (T.unlines (intercalate [""] (shifted <> [[summary]])))
+              lineMap = [renderLineMap moved | not (null moved)]
+          TIO.putStr . T.unlines $
+            if "--moved-lines-jsonl" `elem` flags
+              then movedLinesJsonl moved
+              else intercalate [""] (shifted <> lineMap <> [[summary]])
           mapM_ (TIO.hPutStrLn stderr . ("expacc: " <>)) errs
           unless (null errs) $ exitWith (ExitFailure 1)
     "prune" : flags@(_ : _) -> do

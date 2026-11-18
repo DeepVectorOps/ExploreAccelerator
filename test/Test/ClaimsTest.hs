@@ -125,7 +125,7 @@ spec = describe "expacc replayable explore claims" $ do
         other -> expectationFailure (show other)
     it "line-number drift in rg -n output is Shifted" $ withData "needle one\nhay\n" $ \d f -> do
       rs <- run d [rgClaim "a" f (Just ["99:needle one"])]
-      verdicts rs `shouldBe` [("a", VFalse (Shifted [MovedLine Nothing 99 1 "needle one"]))]
+      verdicts rs `shouldBe` [("a", VFalse (Shifted [MovedLine (Just (cs f)) 99 1 "needle one"]))]
     it "line-number drift without rg -n is a Mismatch" $ withData "needle one\nhay\n" $ \d f -> do
       rs <- run d [bashLine "a" ("grep -n needle " <> cs f) (Just ["99:needle one"])]
       verdicts rs `shouldBe` [("a", VFalse (Mismatch ["99:needle one"] ["1:needle one"]))]
@@ -158,7 +158,7 @@ spec = describe "expacc replayable explore claims" $ do
         ]
       let txt = renderResults PrintFalse rs
       txt `shouldSatisfy` T.isInfixOf "DRIFTED t#a  -- same lines, line numbers moved by +3 (expacc fix-line-shift t to update)\nclaim: "
-      txt `shouldSatisfy` T.isInfixOf "output (command output was transformed: one row per line, old -> new line number):\n"
+      txt `shouldSatisfy` T.isInfixOf "output (command output was transformed: one row per line, path  old -> new line number):\n"
       txt `shouldSatisfy` T.isInfixOf "    src/a.hs  1 -> 4  loginFunction = 1\n"
       txt `shouldSatisfy` T.isInfixOf "    src/b.hs       1  loginFunction = 2\n"
       txt `shouldSatisfy` (not . T.isInfixOf "output: ")
@@ -179,6 +179,50 @@ spec = describe "expacc replayable explore claims" $ do
       v `shouldBe` VFalse (Shifted [MovedLine (Just "src/a.hs") 1 3 "x", MovedLine (Just "src/b.hs") 10 5 "x"])
       renderResults PrintFalse [ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target v Nothing Nothing]
         `shouldSatisfy` T.isInfixOf "line numbers moved (+2, -5)"
+    it "single-file rg output takes its path from the command, or says it is unknown" $ do
+      rgSingleFile "rg -n --sort path -B 3 -A 3 \"class_ \\\"dir-panel\\\"\" web/Main.hs" `shouldBe` Just "web/Main.hs"
+      rgSingleFile "rg -n -e foo -e bar src/a.hs" `shouldBe` Just "src/a.hs"
+      rgSingleFile "cd /x && rg -n foo a.hs | head -3" `shouldBe` Just "/x/a.hs"
+      rgSingleFile "rg -n foo a.hs b.hs" `shouldBe` Nothing
+      rgSingleFile "rg -n foo" `shouldBe` Nothing
+      rgSingleFile "rg -n foo $(ls)" `shouldBe` Nothing
+      let v = compareOutput "rg -n x a.hs b.hs" ["1:x"] ["2:x"]
+      v `shouldBe` VFalse (Shifted [MovedLine Nothing 1 2 "x"])
+      renderResults PrintFalse [ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target v Nothing Nothing]
+        `shouldSatisfy` T.isInfixOf "    (file unknown: rg printed no path and the command names no single file)  1 -> 2  x\n"
+    it "the line map merges claims per file, sorted by old line, and flags conflicts" $ do
+      let ml = MovedLine (Just "a.js")
+          claims =
+            [ ("n#one", [ml 100 102 "p", ml 157 159 "q"])
+            , ("n#two", [ml 200 216 "r", ml 260 276 "s", ml 100 102 "p"])
+            , ("n#three", [ml 157 160 "q", MovedLine (Just "b.hs") 5 5 "z"])
+            ]
+      renderLineMap claims
+        `shouldBe` [ "line map (every line of the drifted claims above, merged per file; old -> new):"
+                   , "  a.js"
+                   , "    offsets (listed lines only): lines 100-157: +2, line 157: +3, lines 200-260: +16"
+                   , "    100 -> 102    +2  n#one, n#two"
+                   , "    157 -> 159    +2  n#one  CONFLICT: claims disagree on this line"
+                   , "    157 -> 160    +3  n#three  CONFLICT: claims disagree on this line"
+                   , "    200 -> 216   +16  n#two"
+                   , "    260 -> 276   +16  n#two"
+                   , "  b.hs"
+                   , "    offsets (listed lines only): line 5: +0"
+                   , "    5 -> 5    +0  n#three"
+                   , "Only the lines listed are known. A cited line that is not listed may have moved by"
+                   , "another offset or changed: find it again (rg -n 'its text' PATH), never interpolate"
+                   , "between listed lines or extend an offset range past its listed ends."
+                   ]
+    it "renders the line map after the drifted claims, not in minimal output" $ do
+      let v = VFalse (Shifted [MovedLine (Just "a.hs") 1 3 "x"])
+          r = ClaimResult (ClaimsName "f") (ClaimId "x") "t" Target v Nothing Nothing
+      renderResults PrintFalse [r] `shouldSatisfy` T.isInfixOf "\nline map (every line"
+      renderResults PrintMinimal [r] `shouldSatisfy` (not . T.isInfixOf "line map")
+    it "emits one JSON record per moved line" $ do
+      movedLinesJsonl [("f#x", [MovedLine (Just "a.hs") 1 3 "x"]), ("f#y", [MovedLine Nothing 7 9 "y"])]
+        `shouldBe` [ "{\"claim\":\"f#x\",\"new\":3,\"old\":1,\"path\":\"a.hs\",\"text\":\"x\"}"
+                   , "{\"claim\":\"f#y\",\"new\":9,\"old\":7,\"path\":null,\"text\":\"y\"}"
+                   ]
     it "one rg line whose text holds :N: or -N- splits at the real path" $ do
       fmap groupRg (parseRgOutput ["src/a.hs:9:x:12:y"]) `shouldBe` Just [Block (Just "src/a.hs") 9 9 ["x:12:y"]]
       fmap groupRg (parseRgOutput ["src/a.hs-4-ctx -5- here"]) `shouldBe` Just [Block (Just "src/a.hs") 4 4 ["ctx -5- here"]]
@@ -431,7 +475,9 @@ spec = describe "expacc replayable explore claims" $ do
       Right done <- fix False d
       (sfTrue done, sfFalse done) `shouldBe` (1, 1)
       sfShifted done `shouldBe` sfShifted dry
-      head (sfShifted done) `shouldBe` ["shifted s#rg  by +1", "output (command output was transformed: one row per line, old -> new line number):", "    1 -> 2  needle one", "    3 -> 4  needle two"]
+      head (sfShifted done) `shouldBe` ["shifted s#rg  by +1", "output (command output was transformed: one row per line, path  old -> new line number):", "    " <> cs f <> "  1 -> 2  needle one", "    " <> cs f <> "  3 -> 4  needle two"]
+      map fst (sfMoved done) `shouldBe` ["s#rg", "s#sed", "s#one"]
+      all (all ((== Just (cs f)) . mlFile) . snd) (sfMoved done) `shouldBe` True
       after <- stored d
       take 3 after
         `shouldBe` [ (rgCmd, Just ["2:needle one", "4:needle two"])

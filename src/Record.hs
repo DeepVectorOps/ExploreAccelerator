@@ -145,16 +145,17 @@ recordFix dir name cid = runExceptT $ withClaimsLock dir name $ do
 -- | Claims of one file whose lines only moved, and how the rest checked.
 data ShiftFixes = ShiftFixes
   { sfShifted :: [[Text]]
+  , sfMoved :: [(Text, [MovedLine])]
   , sfTrue :: Int
   , sfFalse :: Int
   }
   deriving (Eq, Show)
 
 instance Semigroup ShiftFixes where
-  ShiftFixes a b c <> ShiftFixes a' b' c' = ShiftFixes (a <> a') (b + b') (c + c')
+  ShiftFixes a m b c <> ShiftFixes a' m' b' c' = ShiftFixes (a <> a') (m <> m') (b + b') (c + c')
 
 instance Monoid ShiftFixes where
-  mempty = ShiftFixes [] 0 0
+  mempty = ShiftFixes [] [] 0 0
 
 -- | Replays the file's claims, or just one, and moves each 'Shifted' claim to
 -- its new line numbers. Nothing else is rewritten; a dry run writes nothing.
@@ -173,6 +174,7 @@ fixLineShifts dryRun dir ref = runExceptT $ withClaimsLock dir name $ do
   pure
     ShiftFixes
       { sfShifted = [renderShifted (label name (claimId c)) moved | (c, moved) <- fixes]
+      , sfMoved = [(label name (claimId c), moved) | (c, moved) <- fixes]
       , sfTrue = length (filter (== VTrue) verdictsOf)
       , sfFalse = length verdictsOf - length (filter (== VTrue) verdictsOf) - length fixes
       }

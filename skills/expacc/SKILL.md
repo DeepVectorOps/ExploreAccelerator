@@ -82,18 +82,20 @@ expacc lint NAME...
 ### Fixing line shifts
 
 ```
-expacc fix-line-shift [NAME...] [--dry-run]
+expacc fix-line-shift [NAME...] [--dry-run] [--moved-lines-jsonl]
 ```
 
 - Updates every claim whose lines only moved in their file, and prints each old and new position. No NAME means every claims file; `--dry-run` writes nothing.
 - An `rg -n` claim gets a new `expect`. A `sed -n 'A,Bp' FILE` claim gets a new range in `cmd`; don't `record-fix` it, that would store other lines.
+- After the claims it prints a per-file line map: every moved line of every claim, merged by path and sorted by old line, with the offset ranges and the claims behind each row (`CONFLICT` when two claims disagree). `--moved-lines-jsonl` (on `check` too) prints one JSON object per line instead: `{"path", "old", "new", "claim", "text"}`.
+- It updates the claims only. It does not update the note, or line numbers inside a claim's `text`. Update those by joining each citation on path and old line against the map; a line not in the map is unknown, so re-grep it (`rg -n 'its text' PATH`) instead of interpolating. A range `A-B` moves only when both ends are listed with the same offset; otherwise re-grep it.
 - Claims that changed in content are left alone. See [keeping-live-docs-up-to-date.md](keeping-live-docs-up-to-date.md) for the whole routine.
 
 ### Why a claim is FALSE
 
 - `output differs`: the diff shows expected against actual.
   For `rg -n` output the diff is on blocks: a `path:START-END` header, then the lines indented, so a move shows as a changed header and only edited lines show as `-`/`+`.
-- `DRIFTED ... same lines, line numbers moved by +N`: the lines are unchanged but moved in the file. Instead of `output:` lines it prints one row per output line, `path  OLD -> NEW  text`, under a `(command output was transformed: ...)` note. The summary counts these as `drifted`, separate from `false`. Run `expacc fix-line-shift NAME`. If the claim text or your note cites those line numbers, fix them too. Detected for `rg -n` output and for a command that is just `sed -n 'A,Bp' FILE`.
+- `DRIFTED ... same lines, line numbers moved by +N`: the lines are unchanged but moved in the file. Instead of `output:` lines it prints one row per output line, `path  OLD -> NEW  text` (path always shown; `(file unknown: ...)` if the command names no single file), under a `(command output was transformed: ...)` note. The summary counts these as `drifted`, separate from `false`. Run `expacc fix-line-shift NAME`. If the claim text or your note cites those line numbers, fix them from the per-file line map printed after the claims (see Fixing line shifts). Detected for `rg -n` output and for a command that is just `sed -n 'A,Bp' FILE`.
 - `same lines, different order`: an `rg` in the command has no `--sort path`. Add it to every `rg`, edit `cmd` in your own claims file, then `record-fix` the claim.
 - `no expect recorded`: the claim has no `expect`.
 - `rejected`: empty command.

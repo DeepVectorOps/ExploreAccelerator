@@ -17,6 +17,7 @@ import Claims.Result
 import Claims.RgGroup
 import Claims.Run (runCmd)
 import Claims.SedRange (sedShift)
+import Control.Applicative ((<|>))
 import Control.Monad (forM_, unless, when)
 import Data.Bifunctor (first)
 import qualified Data.ByteString as BS
@@ -54,14 +55,16 @@ replayClaim root c = case claimExpect c of
 
 -- | Verdict for a command's expected and actual stdout lines. For @rg -n@
 -- output (every line parses as rg's format) the lines are grouped into
--- blocks, so moved lines are 'Shifted' and a change diffs block-wise.
+-- blocks, so moved lines are 'Shifted' and a change diffs block-wise. A
+-- moved line's file is rg's path, or for single-file output the one file
+-- named in @cmd@ ('Nothing' when the command does not make it clear).
 compareOutput :: Text -> [Text] -> [Text] -> Verdict
 compareOutput cmd e a
   | e == a = VTrue
   | sort e == sort a = VFalse (Reordered e a)
   | Just be <- grouped e
   , Just ba <- grouped a =
-      let moved = [MovedLine (bFile y) (bStart x + k) (bStart y + k) t | (x, y) <- zip be ba, (k, t) <- zip [0 ..] (bBody y)]
+      let moved = [MovedLine (bFile y <|> single) (bStart x + k) (bStart y + k) t | (x, y) <- zip be ba, (k, t) <- zip [0 ..] (bBody y)]
        in if map content be == map content ba && any (\m -> mlOld m /= mlNew m) moved
             then VFalse (Shifted moved)
             else VFalse (RgMismatch (renderBlocks be) (renderBlocks ba))
@@ -71,6 +74,8 @@ compareOutput cmd e a
       | mentionsRgLineNumbers cmd = groupRg <$> parseRgOutput ls
       | otherwise = Nothing
     content b = (bFile b, bBody b)
+    -- rg prints no path when it read one file: take it from the command.
+    single = rgSingleFile cmd
 
 -- | Reads @$EXPACC_DIR/claims/NAME.claims.jsonl@. NAME is a slug; there is
 -- no doc-header lookup and no path acceptance.

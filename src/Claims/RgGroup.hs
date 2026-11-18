@@ -10,6 +10,7 @@ module Claims.RgGroup
   ( Block (..)
   , RgLine (..)
   , mentionsRgLineNumbers
+  , rgSingleFile
   , parseRgOutput
   , groupRg
   , blockHeader
@@ -135,3 +136,74 @@ blockHeader Block {..} = case bFile of
 -- | Header line, then the body lines indented by two spaces.
 renderBlocks :: [Block] -> [Text]
 renderBlocks = concatMap (\b -> blockHeader b : map ("  " <>) (bBody b))
+
+-- | The one file a single-file @rg@ search read, from the command: the
+-- @rg@ call must be the only one, optionally after @cd DIR &&@ (then the
+-- path is shown under DIR), with exactly one path argument after the
+-- pattern. 'Nothing' when that is not clear from the command.
+rgSingleFile :: Text -> Maybe Text
+rgSingleFile cmd = do
+  ws <- shellWords cmd
+  let segs = splitOps ws
+  (cdDir, rgArgs) <- case [s | s@(w : _) <- segs, isRg w] of
+    [_ : args] -> Just (cdOf segs, args)
+    _ -> Nothing
+  path <- case positional False rgArgs of
+    (ps, True) | [p] <- ps -> Just p
+    (_ : ps, False) | [p] <- ps -> Just p
+    _ -> Nothing
+  Just (maybe path (\d -> if "/" `T.isPrefixOf` path then path else T.dropWhileEnd (== '/') d <> "/" <> path) cdDir)
+  where
+    isRg w = w == "rg" || "/rg" `T.isSuffixOf` w
+    ops = ["|", "||", "&&", ";", "&"]
+    splitOps ws = case break (`elem` ops) ws of
+      (s, []) -> [s]
+      (s, _ : r) -> s : splitOps r
+    cdOf = \case
+      ["cd", d] : _ -> Just d
+      _ -> Nothing
+    -- Positional words, and whether the pattern came from -e/-f.
+    positional pat = \case
+      [] -> ([], pat)
+      "--" : r -> (r, pat)
+      w : v : r
+        | w `elem` ["-e", "--regexp", "-f", "--file"] -> positional True r
+        | w `elem` valued -> const (positional pat r) v
+      w : r
+        | "--regexp=" `T.isPrefixOf` w || "--file=" `T.isPrefixOf` w -> positional True r
+        | "-" `T.isPrefixOf` w && T.length w > 1 -> positional pat r
+        | otherwise -> let (ps, p) = positional pat r in (w : ps, p)
+    valued =
+      [ "-A", "-B", "-C", "-g", "-t", "-T", "-m", "-M", "-j", "-r", "-E", "--sort", "--sortr", "--glob", "--iglob"
+      , "--type", "--type-not", "--max-count", "--context", "--after-context", "--before-context", "--max-columns"
+      , "--replace", "--encoding", "--color", "--colors", "--threads", "--max-depth", "--max-filesize", "--path-separator"
+      ]
+
+-- | Bash words with quotes removed and @| || && ; &@ as words of their own;
+-- 'Nothing' for anything harder (unbalanced quotes, @$(...)@, backticks).
+shellWords :: Text -> Maybe [Text]
+shellWords = go [] Nothing . T.unpack
+  where
+    go acc cur = \case
+      [] -> Just (reverse (flush cur acc))
+      c : r
+        | isSpace c -> go (flush cur acc) Nothing r
+        | c `elem` ("`$()<>" :: String) -> Nothing
+        | c == '\'' -> let (q, r') = break (== '\'') r in close r' (cur <> Just (T.pack q)) acc
+        | c == '"' -> dquote [] r >>= \(q, r') -> go acc (cur <> Just (T.pack q)) r'
+        | c == '\\', d : r' <- r -> go acc (cur <> Just (T.singleton d)) r'
+        | c `elem` ("|&;" :: String) ->
+            let (o, r') = span (`elem` ("|&;" :: String)) (c : r)
+             in go (T.pack o : flush cur acc) Nothing r'
+        | otherwise -> go acc (cur <> Just (T.singleton c)) r
+    close r acc' acc = case r of
+      _ : r' -> go acc acc' r'
+      [] -> Nothing
+    -- Inside double quotes: @\\@ escapes @" \\ $ `@; an unescaped @$@ or @`@ expands, so give up.
+    dquote q = \case
+      '"' : r -> Just (reverse q, r)
+      '\\' : d : r | d `elem` ("\"\\$`" :: String) -> dquote (d : q) r
+      d : r | d `elem` ("$`" :: String) -> Nothing
+      d : r -> dquote (d : q) r
+      [] -> Nothing
+    flush cur acc = maybe acc (: acc) cur

@@ -579,34 +579,135 @@ async function runCheck(p, name) {
   }
 }
 
+let runAllDialog = null;
+
+function openRunAllDialog(names) {
+  if (!runAllDialog) {
+    runAllDialog = document.createElement('dialog');
+    runAllDialog.className = 'check-dialog run-all-dialog';
+    const header = document.createElement('div');
+    header.className = 'check-head';
+    const title = document.createElement('h2');
+    title.textContent = 'Run all';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => runAllDialog.close());
+    header.append(title, close);
+    const summary = document.createElement('div');
+    summary.className = 'run-all-summary';
+    const wrap = document.createElement('div');
+    wrap.className = 'run-all-table';
+    const table = document.createElement('table');
+    const head = document.createElement('tr');
+    ['File', 'Score', 'True / total'].forEach(t => {
+      const th = document.createElement('th');
+      th.textContent = t;
+      head.append(th);
+    });
+    const thead = document.createElement('thead');
+    thead.append(head);
+    table.append(thead, document.createElement('tbody'));
+    wrap.append(table);
+    runAllDialog.append(header, summary, wrap);
+    runAllDialog.addEventListener('click', ev => {
+      if (ev.target === runAllDialog) runAllDialog.close();
+    });
+    document.body.append(runAllDialog);
+  }
+  const tbody = runAllDialog.querySelector('tbody');
+  tbody.replaceChildren();
+  const rows = new Map();
+  names.forEach(name => {
+    const tr = document.createElement('tr');
+    const nameCell = document.createElement('td');
+    nameCell.textContent = name;
+    const status = document.createElement('td');
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    spinner.setAttribute('aria-label', 'Running');
+    status.append(spinner);
+    const counts = document.createElement('td');
+    tr.append(nameCell, status, counts);
+    tbody.append(tr);
+    rows.set(name, {status, counts});
+  });
+  if (!runAllDialog.open) runAllDialog.showModal();
+  return rows;
+}
+
+function renderRunAllSummary(tally, total) {
+  const box = runAllDialog.querySelector('.run-all-summary');
+  box.replaceChildren();
+  const part = (n, label, className) => {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = n + ' ' + label;
+    return span;
+  };
+  const running = total - tally.good - tally.mid - tally.bad - tally.none - tally.failed;
+  box.append(
+    part(tally.good, 'green', 'pct-good'),
+    part(tally.mid, 'orange', 'pct-mid'),
+    part(tally.bad, 'red', 'pct-bad'),
+    part(tally.none, 'no claims', ''),
+    part(tally.failed, 'failed', 'pct-bad'),
+    part(running, 'running', ''));
+}
+
+let runAllSeq = 0;
+
 async function runAll(p, btn, err) {
+  const seq = ++runAllSeq;
+  const names = (p.claims || []).filter(c => c && typeof c.name === 'string').map(c => c.name);
   btn.disabled = true;
   btn.textContent = 'Running…';
   err.textContent = '';
-  try {
-    const res = await fetch('/api/check-all', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({root: p.root})
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      err.textContent = data.error || 'check failed';
-      btn.disabled = false;
-      btn.textContent = 'Run all';
-      return;
+  const rows = openRunAllDialog(names);
+  const tally = {good: 0, mid: 0, bad: 0, none: 0, failed: 0};
+  const scores = new Map();
+  renderRunAllSummary(tally, names.length);
+  const checkOne = async name => {
+    let data = null;
+    try {
+      const res = await fetch('/api/check-file', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({root: p.root, name})
+      });
+      const body = await res.json();
+      data = res.ok ? body : {error: body.error || 'check failed'};
+    } catch (e) {
+      data = {error: 'check failed'};
     }
-    claimScores = new Map();
-    (data.files || []).forEach(f => {
-      if (f && typeof f.name === 'string') claimScores.set(f.name, f);
-    });
-    claimScoresRoot = p.root;
-    renderWorkspace(p, lastDef);
-  } catch (e) {
-    err.textContent = 'check failed';
-    btn.disabled = false;
-    btn.textContent = 'Run all';
-  }
+    if (seq !== runAllSeq) return;
+    const row = rows.get(name);
+    if (data.error) {
+      tally.failed++;
+      row.status.textContent = data.error;
+      row.status.className = 'pct-bad';
+    } else {
+      scores.set(name, data);
+      const pct = pctText(data);
+      row.status.textContent = pct.text;
+      row.status.className = pct.className;
+      row.counts.textContent = data.true + ' / ' + data.total;
+      if (pct.className === 'pct-good') tally.good++;
+      else if (pct.className === 'pct-mid') tally.mid++;
+      else if (pct.className === 'pct-bad') tally.bad++;
+      else tally.none++;
+    }
+    renderRunAllSummary(tally, names.length);
+  };
+  const queue = names.slice();
+  const worker = async () => {
+    while (queue.length && seq === runAllSeq) await checkOne(queue.shift());
+  };
+  await Promise.all(Array.from({length: Math.min(4, names.length)}, worker));
+  if (seq !== runAllSeq) return;
+  claimScores = scores;
+  claimScoresRoot = p.root;
+  renderWorkspace(p, lastDef);
 }
 
 $('dir-toggle').addEventListener('click', () => {
@@ -620,7 +721,7 @@ document.addEventListener('click', ev => {
   setDirPanel(false);
 });
 document.addEventListener('keydown', ev => {
-  if (ev.key === 'Escape' && !(checkDialog && checkDialog.open)) setDirPanel(false);
+  if (ev.key === 'Escape' && !(checkDialog && checkDialog.open) && !(runAllDialog && runAllDialog.open)) setDirPanel(false);
 });
 $('add-root').addEventListener('click', () => {
   const v = $('root-input').value.trim();

@@ -398,3 +398,51 @@ pre {
   white-space: pre;
   overflow: auto;
 }
+
+.run-all-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: .6rem .8rem;
+  border-bottom: 1px solid #34384a;
+}
+
+.run-all-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 .8rem .6rem;
+}
+
+.run-all-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.run-all-table th,
+.run-all-table td {
+  text-align: left;
+  padding: .3rem .5rem;
+  border-bottom: 1px solid #262a38;
+}
+
+.run-all-table th {
+  position: sticky;
+  top: 0;
+  background: #171a22;
+}
+
+.spinner {
+  display: inline-block;
+  width: .9rem;
+  height: .9rem;
+  border: 2px solid #34384a;
+  border-top-color: #e7e9ee;
+  border-radius: 50%;
+  vertical-align: middle;
+  animation: spin .8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

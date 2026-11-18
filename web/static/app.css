@@ -30,8 +30,8 @@ h1 {
 
 .dir-panel {
   position: absolute;
-  top: 100%;
-  left: 0;
+  top: 2.6rem;
+  left: .8rem;
   width: min(32rem, calc(100vw - 1rem));
   max-height: 50vh;
   overflow: auto;

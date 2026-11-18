@@ -116,6 +116,15 @@ function renderRoots() {
     li.append(span, b);
     ul.append(li);
   });
+  const toggle = $('dir-toggle');
+  toggle.textContent = roots.length ? 'Directories (' + roots.length + ')' : 'Add directory';
+}
+
+function setDirPanel(open) {
+  const panel = document.querySelector('.dir-panel');
+  const toggle = $('dir-toggle');
+  panel.hidden = !open;
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
 async function scan() {
@@ -297,12 +306,11 @@ function workspaceBar(p, def) {
 
 function sortNotes(notes) {
   const dir = noteSort.dir;
-  const key = noteSort.key;
+  const key = noteSort.key === 'claims' ? 'note' : noteSort.key;
   return notes.slice().sort((a, b) => {
     let c = 0;
     if (key === 'size') c = (Number(a.bytes) || 0) - (Number(b.bytes) || 0);
     else if (key === 'modified') c = String(a.modified || '').localeCompare(String(b.modified || ''));
-    else if (key === 'claims') c = String(a.claims ? a.slug + '.claims.jsonl' : '').localeCompare(String(b.claims ? b.slug + '.claims.jsonl' : ''));
     else c = String(a.slug || '').localeCompare(String(b.slug || ''));
     if (c === 0) c = String(a.slug || '').localeCompare(String(b.slug || ''));
     return c * dir;
@@ -341,50 +349,61 @@ function notesPane(p, notes, orphans) {
   const runAllErr = document.createElement('span');
   runAllErr.className = 'err';
   runAllBtn.addEventListener('click', () => runAll(p, runAllBtn, runAllErr));
-  bar.append(runAllBtn, runAllErr);
+  const sortKey = noteSort.key === 'claims' ? 'note' : noteSort.key;
+  const sortSel = document.createElement('select');
+  sortSel.setAttribute('aria-label', 'Sort notes');
+  [['note', 'Note'], ['size', 'Size'], ['modified', 'Modified']].forEach(([value, label]) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    if (value === sortKey) opt.selected = true;
+    sortSel.append(opt);
+  });
+  sortSel.addEventListener('change', () => {
+    noteSort = {key: sortSel.value, dir: noteSort.dir};
+    renderWorkspace(p, lastDef);
+  });
+  const dirBtn = document.createElement('button');
+  dirBtn.type = 'button';
+  dirBtn.textContent = sortKey === 'note'
+    ? (noteSort.dir < 0 ? 'Z-A' : 'A-Z')
+    : (noteSort.dir < 0 ? '↓' : '↑');
+  dirBtn.addEventListener('click', () => {
+    noteSort = {key: sortKey, dir: -noteSort.dir};
+    renderWorkspace(p, lastDef);
+  });
+  bar.append(runAllBtn, sortSel, dirBtn, runAllErr);
   const scroll = document.createElement('div');
   scroll.className = 'note-scroll';
-  const table = document.createElement('table');
-  table.className = 'notes-table';
-  const head = document.createElement('thead');
-  const hr = document.createElement('tr');
-  const cols = [
-    ['Note', 'note', ''],
-    ['Size', 'size', 'num size'],
-    ['Modified', 'modified', 'num modified'],
-    ['Claims file', 'claims', ''],
-    ['%', null, 'num']
-  ];
-  cols.forEach(([label, key, className]) => {
-    const el = th(label, className);
-    if (key) {
-      el.addEventListener('click', () => {
-        if (noteSort.key === key) noteSort.dir = -noteSort.dir;
-        else noteSort = {key, dir: 1};
-        renderWorkspace(p, lastDef);
-      });
-    }
-    hr.append(el);
-  });
-  head.append(hr);
-  const body = document.createElement('tbody');
   notes.forEach(n => {
-    const tr = document.createElement('tr');
-    const noteCell = td(n.slug);
-    noteCell.title = n.rel;
-    const claimsCell = td(n.claims ? n.slug + '.claims.jsonl' : '');
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'note-row';
+    if (openKind === 'note' && openSlug === n.slug) row.classList.add('open');
+    const slug = document.createElement('span');
+    slug.className = 'note-slug';
+    slug.textContent = n.slug;
+    slug.title = n.rel;
+    const meta = document.createElement('span');
+    meta.className = 'note-meta';
+    meta.append(document.createTextNode(human(n.bytes) + ' · ' + shortTime(n.modified)));
+    if (n.modified) meta.title = n.modified;
     const shown = n.claims ? pctText(scoreFor(p, n.slug)) : null;
-    tr.append(noteCell, td(human(n.bytes), 'num size'), modifiedCell(n.modified), claimsCell, td(shown ? shown.text : '', shown ? shown.className : ''));
-    if (openKind === 'note' && openSlug === n.slug) tr.classList.add('open');
-    tr.addEventListener('click', () => {
+    if (shown) {
+      meta.append(document.createTextNode(' · '));
+      const mark = document.createElement('span');
+      mark.textContent = shown.text;
+      if (shown.className) mark.className = shown.className;
+      meta.append(mark);
+    }
+    row.append(slug, meta);
+    row.addEventListener('click', () => {
       openSlug = n.slug;
       openKind = 'note';
       renderWorkspace(p, lastDef);
     });
-    body.append(tr);
+    scroll.append(row);
   });
-  table.append(head, body);
-  scroll.append(table);
   pane.append(bar, scroll);
   if (orphans.length) {
     const sec = document.createElement('section');
@@ -398,11 +417,15 @@ function notesPane(p, notes, orphans) {
       row.type = 'button';
       row.className = 'orphan';
       if (openKind === 'orphan' && openSlug === c.name) row.classList.add('open');
-      row.append(document.createTextNode(c.name + '.claims.jsonl'));
+      const name = document.createElement('span');
+      name.className = 'orphan-name';
+      name.textContent = c.name + '.claims.jsonl';
+      name.title = c.name + '.claims.jsonl';
+      row.append(name);
       const shown = pctText(scoreFor(p, c.name));
       if (shown) {
         const mark = document.createElement('span');
-        mark.textContent = ' ' + shown.text;
+        mark.textContent = shown.text;
         if (shown.className) mark.className = shown.className;
         row.append(mark);
       }
@@ -552,6 +575,19 @@ async function runAll(p, btn, err) {
   }
 }
 
+$('dir-toggle').addEventListener('click', () => {
+  setDirPanel($('dir-toggle').getAttribute('aria-expanded') !== 'true');
+});
+document.addEventListener('click', ev => {
+  const panel = document.querySelector('.dir-panel');
+  const toggle = $('dir-toggle');
+  if (panel.hidden) return;
+  if (panel.contains(ev.target) || toggle.contains(ev.target)) return;
+  setDirPanel(false);
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') setDirPanel(false);
+});
 $('add-root').addEventListener('click', () => {
   const v = $('root-input').value.trim();
   if (!v || roots.includes(v)) return;

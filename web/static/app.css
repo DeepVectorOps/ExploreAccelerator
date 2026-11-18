@@ -24,21 +24,39 @@ h1 {
   padding: .55rem .8rem;
   border-bottom: 1px solid #2c3142;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 3;
+}
+
+.dir-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: min(32rem, calc(100vw - 1rem));
+  max-height: 50vh;
+  overflow: auto;
+  background: #181b24;
+  border: 1px solid #2c3142;
+  padding: .6rem .7rem;
+  z-index: 4;
+  box-sizing: border-box;
+}
+
+.dir-panel[hidden] {
+  display: none;
+}
+
+.dir-add {
+  display: flex;
+  gap: .4rem;
+  align-items: center;
 }
 
 .shell {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 18rem 1fr;
-}
-
-.side {
-  min-height: 0;
-  overflow: auto;
-  border-right: 1px solid #2c3142;
-  padding: .6rem .7rem;
-  background: #181b24;
+  grid-template-columns: 1fr;
 }
 
 .label {
@@ -102,7 +120,7 @@ button {
 }
 
 #root-input {
-  min-width: 16rem;
+  min-width: 0;
   flex: 1;
 }
 
@@ -174,7 +192,7 @@ tr.selected, tr.open {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(18rem, 0.9fr) minmax(22rem, 1.6fr);
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
   gap: .6rem;
 }
 
@@ -190,28 +208,53 @@ tr.selected, tr.open {
   flex: none;
   height: auto;
   max-height: none;
-  min-height: 8rem;
+  min-height: 0;
   overflow: visible;
 }
 
-table.notes-table {
-  table-layout: fixed;
-  max-width: 100%;
-}
-
-table.notes-table th,
-table.notes-table td {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-table.notes-table th {
+table.projects tbody tr.pick {
   cursor: pointer;
 }
 
-table.projects tbody tr.pick,
-table.notes-table tbody tr {
-  cursor: pointer;
+.run-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+  flex: 0 0 auto;
+  padding: .15rem 0 .35rem;
+}
+
+.note-row, .orphan {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .1rem;
+  width: 100%;
+  text-align: left;
+  margin: .15rem 0;
+  background: transparent;
+  min-width: 0;
+}
+
+.note-row.open, .orphan.open {
+  background: #243049;
+}
+
+.note-slug, .orphan-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-meta {
+  color: #b7beca;
+  font-size: .85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .orphans {
@@ -224,15 +267,9 @@ table.notes-table tbody tr {
 }
 
 .orphan {
-  display: block;
-  width: 100%;
-  text-align: left;
-  margin: .15rem 0;
-  background: transparent;
-}
-
-.orphan.open {
-  background: #243049;
+  flex-direction: row;
+  align-items: center;
+  gap: .4rem;
 }
 
 .viewer {
@@ -241,8 +278,7 @@ table.notes-table tbody tr {
   max-height: none;
   min-height: 8rem;
   overflow: visible;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
   background: #181b24;
   border: 1px solid #2c3142;
   border-radius: 8px;
@@ -254,8 +290,7 @@ table.notes-table tbody tr {
   height: auto;
   max-height: none;
   overflow: visible;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
   margin-top: .4rem;
   border-top: 1px solid #2c3142;
 }
@@ -272,14 +307,12 @@ pre {
   padding: .6rem;
   border-radius: 8px;
   overflow: visible;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .md {
   max-width: 48rem;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .md h1 { font-size: 1.45rem; margin: .8rem 0 .4rem; }
@@ -291,16 +324,14 @@ pre {
   background: #0e1016;
   padding: .05rem .25rem;
   border-radius: 4px;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .md pre {
   background: #0e1016;
   padding: .6rem;
   white-space: pre-wrap;
   overflow: visible;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .md pre code {
   background: transparent;
@@ -319,6 +350,6 @@ pre {
 @media (max-width: 800px) {
   .split {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(10rem, 0.8fr) minmax(12rem, 1.2fr);
+    grid-template-rows: minmax(8rem, 16rem) minmax(0, 1fr);
   }
 }

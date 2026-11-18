@@ -232,12 +232,13 @@ page = doctypehtml_ $ do
   body_ $ do
     header_ [class_ "top"] $ do
       h1_ "Live docs"
-      input_ [id_ "root-input", type_ "text", placeholder_ "/absolute/path"]
-      button_ [id_ "add-root", type_ "button"] "Add"
+      button_ [id_ "dir-toggle", type_ "button", ariaExpanded_ "false"] "Add directory"
+    div_ [class_ "dir-panel", hidden_ "hidden"] $ do
+      div_ [class_ "dir-add"] $ do
+        input_ [id_ "root-input", type_ "text", placeholder_ "/absolute/path"]
+        button_ [id_ "add-root", type_ "button"] "Add"
+      ul_ [id_ "root-list"] ""
     div_ [class_ "shell"] $ do
-      aside_ [class_ "side"] $ do
-        p_ [class_ "label"] "Directories"
-        ul_ [id_ "root-list"] ""
       main_ [class_ "explorer"] $ do
         div_ [id_ "projects"] ""
         div_ [id_ "workspace"] ""

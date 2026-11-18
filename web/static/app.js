@@ -15,6 +15,8 @@ let lastDef = null;
 let openSlug = null;
 let openKind = null;
 let noteSort = {key: 'note', dir: 1};
+let claimScoresRoot = null;
+let claimScores = new Map();
 const $ = id => document.getElementById(id);
 
 function human(n) {
@@ -131,6 +133,8 @@ async function scan() {
     openSlug = null;
     openKind = null;
     noteSort = {key: 'note', dir: 1};
+    claimScoresRoot = null;
+    claimScores = new Map();
     selectedRoot = found.length === 1 ? found[0].root : null;
   }
   lastProjects = projects;
@@ -176,6 +180,8 @@ function projectRow(p) {
       openSlug = null;
       openKind = null;
       noteSort = {key: 'note', dir: 1};
+      claimScoresRoot = null;
+      claimScores = new Map();
     }
     selectedRoot = p.root;
     renderProjects(lastProjects, lastDef);
@@ -310,9 +316,32 @@ function workspaceSplit(p, notes, orphans) {
   return split;
 }
 
+function pctText(score) {
+  if (!score) return null;
+  if (score.total === 0 || score.pct == null) return {text: '—', className: ''};
+  let className = 'pct-bad';
+  if (score.pct > 75) className = 'pct-good';
+  else if (score.pct >= 50) className = 'pct-mid';
+  return {text: score.pct + '%', className};
+}
+
+function scoreFor(p, name) {
+  if (!p || p.root !== claimScoresRoot || typeof name !== 'string') return null;
+  return claimScores.get(name) || null;
+}
+
 function notesPane(p, notes, orphans) {
   const pane = document.createElement('div');
   pane.className = 'notes';
+  const bar = document.createElement('div');
+  bar.className = 'run-all';
+  const runAllBtn = document.createElement('button');
+  runAllBtn.type = 'button';
+  runAllBtn.textContent = 'Run all';
+  const runAllErr = document.createElement('span');
+  runAllErr.className = 'err';
+  runAllBtn.addEventListener('click', () => runAll(p, runAllBtn, runAllErr));
+  bar.append(runAllBtn, runAllErr);
   const scroll = document.createElement('div');
   scroll.className = 'note-scroll';
   const table = document.createElement('table');
@@ -323,15 +352,18 @@ function notesPane(p, notes, orphans) {
     ['Note', 'note', ''],
     ['Size', 'size', 'num size'],
     ['Modified', 'modified', 'num modified'],
-    ['Claims file', 'claims', '']
+    ['Claims file', 'claims', ''],
+    ['%', null, 'num']
   ];
   cols.forEach(([label, key, className]) => {
     const el = th(label, className);
-    el.addEventListener('click', () => {
-      if (noteSort.key === key) noteSort.dir = -noteSort.dir;
-      else noteSort = {key, dir: 1};
-      renderWorkspace(p, lastDef);
-    });
+    if (key) {
+      el.addEventListener('click', () => {
+        if (noteSort.key === key) noteSort.dir = -noteSort.dir;
+        else noteSort = {key, dir: 1};
+        renderWorkspace(p, lastDef);
+      });
+    }
     hr.append(el);
   });
   head.append(hr);
@@ -341,7 +373,8 @@ function notesPane(p, notes, orphans) {
     const noteCell = td(n.slug);
     noteCell.title = n.rel;
     const claimsCell = td(n.claims ? n.slug + '.claims.jsonl' : '');
-    tr.append(noteCell, td(human(n.bytes), 'num size'), modifiedCell(n.modified), claimsCell);
+    const shown = n.claims ? pctText(scoreFor(p, n.slug)) : null;
+    tr.append(noteCell, td(human(n.bytes), 'num size'), modifiedCell(n.modified), claimsCell, td(shown ? shown.text : '', shown ? shown.className : ''));
     if (openKind === 'note' && openSlug === n.slug) tr.classList.add('open');
     tr.addEventListener('click', () => {
       openSlug = n.slug;
@@ -352,13 +385,29 @@ function notesPane(p, notes, orphans) {
   });
   table.append(head, body);
   scroll.append(table);
-  pane.append(scroll);
+  pane.append(bar, scroll);
   if (orphans.length) {
     const sec = document.createElement('section');
     sec.className = 'orphans';
     const h = document.createElement('p');
     h.className = 'label';
     h.textContent = 'Claims with no note';
+    sec.append(h);
+    orphans.forEach(c => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'orphan';
+      if (openKind === 'orphan' && openSlug === c.name) row.classList.add('open');
+      row.append(document.createTextNode(c.name + '.claims.jsonl'));
+      const shown = pctText(scoreFor(p, c.name));
+      if (shown) {
+        const mark = document.createElement('span');
+        mark.textContent = ' ' + shown.text;
+        if (shown.className) mark.className = shown.className;
+        row.append(mark);
+      }
+      row.addEventListener('click', () => {
+        openSlug = c.name;
     sec.append(h);
     orphans.forEach(c => {
       const row = document.createElement('button');
@@ -480,6 +529,36 @@ async function runCheck(p, name, pre) {
   });
   const data = await res.json();
   pre.textContent = data.text || data.error || '';
+}
+
+async function runAll(p, btn, err) {
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  err.textContent = '';
+  try {
+    const res = await fetch('/api/check-all', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({root: p.root})
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      err.textContent = data.error || 'check failed';
+      btn.disabled = false;
+      btn.textContent = 'Run all';
+      return;
+    }
+    claimScores = new Map();
+    (data.files || []).forEach(f => {
+      if (f && typeof f.name === 'string') claimScores.set(f.name, f);
+    });
+    claimScoresRoot = p.root;
+    renderWorkspace(p, lastDef);
+  } catch (e) {
+    err.textContent = 'check failed';
+    btn.disabled = false;
+    btn.textContent = 'Run all';
+  }
 }
 
 $('add-root').addEventListener('click', () => {

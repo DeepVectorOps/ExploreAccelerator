@@ -408,15 +408,6 @@ function notesPane(p, notes, orphans) {
       }
       row.addEventListener('click', () => {
         openSlug = c.name;
-    sec.append(h);
-    orphans.forEach(c => {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'orphan';
-      if (openKind === 'orphan' && openSlug === c.name) row.classList.add('open');
-      row.textContent = c.name + '.claims.jsonl';
-      row.addEventListener('click', () => {
-        openSlug = c.name;
         openKind = 'orphan';
         renderWorkspace(p, lastDef);
       });

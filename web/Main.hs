@@ -23,7 +23,7 @@ import System.FilePath ((</>))
 import Web.Scotty
 import Claims (allTrue, checkClaimsIn, checkRefIn, listClaimsNames, parseDepRef, renderResults, PrintMode (..))
 import Claims.Name (ClaimsName (..))
-import Claims.Result (ClaimResult (..))
+import Claims.Result (ClaimResult (..), Origin (..), Reason (..), Verdict (..))
 import Data.Function (on)
 import Data.List (groupBy, sortOn)
 import Prune (scoreOf)
@@ -155,19 +155,23 @@ lifetimeErrors =
   , "days must be > 0"
   ]
 
-fileScores :: [ClaimsName] -> [ClaimResult] -> [(ClaimsName, Int, Int, Maybe Int)]
+-- | Per file: true, drifted and scored claims, and the percentage true. As in
+-- the CLI summary, drifted claims are false but counted apart.
+fileScores :: [ClaimsName] -> [ClaimResult] -> [(ClaimsName, Int, Int, Int, Maybe Int)]
 fileScores names rs =
   let grouped = groupBy ((==) `on` resFile) (sortOn resFile rs)
       own name = [r | g@(r0 : _) <- grouped, resFile r0 == name, r <- g]
+      drifted = length . filter (\r -> resOrigin r == Target && isShifted (resVerdict r))
+      isShifted = \case VFalse (Shifted _) -> True; _ -> False
       score name =
         let (t, n) = scoreOf (own name)
             pct = if n == 0 then Nothing else Just (round (100 * fromIntegral t / fromIntegral n :: Double))
-         in (name, t, n, pct)
+         in (name, t, drifted (own name), n, pct)
    in map score names
 
-fileScoreJson :: (ClaimsName, Int, Int, Maybe Int) -> A.Value
-fileScoreJson (ClaimsName name, t, n, pct) =
-  object ["name" .= name, "true" .= t, "total" .= n, "pct" .= pct]
+fileScoreJson :: (ClaimsName, Int, Int, Int, Maybe Int) -> A.Value
+fileScoreJson (ClaimsName name, t, d, n, pct) =
+  object ["name" .= name, "true" .= t, "false" .= (n - t - d), "drifted" .= d, "total" .= n, "pct" .= pct]
 
 bad :: Text -> ActionM ()
 bad msg = do

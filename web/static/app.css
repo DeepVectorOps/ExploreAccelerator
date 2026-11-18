@@ -400,11 +400,12 @@ pre {
 }
 
 .run-all-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
   padding: .6rem .8rem;
   border-bottom: 1px solid #34384a;
+}
+
+.run-all-summary p {
+  margin: .15rem 0;
 }
 
 .run-all-table {
@@ -427,6 +428,8 @@ pre {
 }
 
 .run-all-table th {
+  cursor: pointer;
+  user-select: none;
   position: sticky;
   top: 0;
   background: #171a22;

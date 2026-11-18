@@ -581,6 +581,35 @@ async function runCheck(p, name) {
 
 let runAllDialog = null;
 
+// Columns of the Run all table: header, sort key and cell text.
+const runAllColumns = [
+  {label: 'File', key: r => r.name},
+  {label: 'Score %', key: r => (r.data && r.data.pct != null ? r.data.pct : Infinity)},
+  {label: 'True', key: r => (r.data ? r.data.true : -1)},
+  {label: 'False', key: r => (r.data ? r.data.false : -1)},
+  {label: 'Drifted', key: r => (r.data ? r.data.drifted : -1)},
+  {label: 'Total', key: r => (r.data ? r.data.total : -1)}
+];
+let runAllRows = [];
+let runAllSort = null;
+
+function sortRunAllRows() {
+  const tbody = runAllDialog.querySelector('tbody');
+  const rows = runAllRows.slice();
+  if (runAllSort) {
+    const key = runAllColumns[runAllSort.col].key;
+    rows.sort((x, y) => {
+      const a = key(x), b = key(y);
+      const c = a < b ? -1 : a > b ? 1 : x.index - y.index;
+      return runAllSort.asc ? c : -c;
+    });
+  }
+  runAllDialog.querySelectorAll('thead th').forEach((th, i) => {
+    th.setAttribute('aria-sort', runAllSort && runAllSort.col === i ? (runAllSort.asc ? 'ascending' : 'descending') : 'none');
+  });
+  tbody.replaceChildren(...rows.map(r => r.tr));
+}
+
 function openRunAllDialog(names) {
   if (!runAllDialog) {
     runAllDialog = document.createElement('dialog');
@@ -600,9 +629,14 @@ function openRunAllDialog(names) {
     wrap.className = 'run-all-table';
     const table = document.createElement('table');
     const head = document.createElement('tr');
-    ['File', 'Score', 'True / total'].forEach(t => {
+    runAllColumns.forEach((c, i) => {
       const th = document.createElement('th');
-      th.textContent = t;
+      th.textContent = c.label;
+      th.title = 'Sort by ' + c.label;
+      th.addEventListener('click', () => {
+        runAllSort = {col: i, asc: runAllSort && runAllSort.col === i ? !runAllSort.asc : true};
+        sortRunAllRows();
+      });
       head.append(th);
     });
     const thead = document.createElement('thead');
@@ -615,23 +649,22 @@ function openRunAllDialog(names) {
     });
     document.body.append(runAllDialog);
   }
-  const tbody = runAllDialog.querySelector('tbody');
-  tbody.replaceChildren();
+  runAllSort = null;
   const rows = new Map();
-  names.forEach(name => {
+  runAllRows = names.map((name, index) => {
     const tr = document.createElement('tr');
-    const nameCell = document.createElement('td');
-    nameCell.textContent = name;
-    const status = document.createElement('td');
+    const cells = runAllColumns.map(() => document.createElement('td'));
+    cells[0].textContent = name;
     const spinner = document.createElement('span');
     spinner.className = 'spinner';
     spinner.setAttribute('aria-label', 'Running');
-    status.append(spinner);
-    const counts = document.createElement('td');
-    tr.append(nameCell, status, counts);
-    tbody.append(tr);
-    rows.set(name, {status, counts});
+    cells[1].append(spinner);
+    tr.append(...cells);
+    const row = {name, index, tr, cells, data: null};
+    rows.set(name, row);
+    return row;
   });
+  sortRunAllRows();
   if (!runAllDialog.open) runAllDialog.showModal();
   return rows;
 }
@@ -639,20 +672,40 @@ function openRunAllDialog(names) {
 function renderRunAllSummary(tally, total) {
   const box = runAllDialog.querySelector('.run-all-summary');
   box.replaceChildren();
-  const part = (n, label, className) => {
-    const span = document.createElement('span');
-    span.className = className;
-    span.textContent = n + ' ' + label;
-    return span;
+  const num = n => n.toLocaleString('en-US');
+  const share = n => (tally.claims ? ' (' + Math.round(100 * n / tally.claims) + '%)' : '');
+  const line = (label, parts) => {
+    const p = document.createElement('p');
+    const head = document.createElement('strong');
+    head.textContent = label + ':';
+    p.append(head);
+    parts.forEach((part, i) => {
+      p.append(document.createTextNode(i ? ' · ' : ' '));
+      const span = document.createElement('span');
+      span.textContent = part[0];
+      if (part[1]) span.className = part[1];
+      p.append(span);
+    });
+    return p;
   };
-  const running = total - tally.good - tally.mid - tally.bad - tally.none - tally.failed;
-  box.append(
-    part(tally.good, 'green', 'pct-good'),
-    part(tally.mid, 'orange', 'pct-mid'),
-    part(tally.bad, 'red', 'pct-bad'),
-    part(tally.none, 'no claims', ''),
-    part(tally.failed, 'failed', 'pct-bad'),
-    part(running, 'running', ''));
+  const done = tally.good + tally.mid + tally.bad + tally.none + tally.failed;
+  const claims = [
+    [num(tally.claims) + ' total'],
+    [num(tally.true) + ' true' + share(tally.true), 'pct-good'],
+    [num(tally.false) + ' false' + share(tally.false), 'pct-bad'],
+    [num(tally.drifted) + ' drifted' + share(tally.drifted), 'drifted']
+  ];
+  // Thresholds match pctText: green > 75%, orange 50–75%, red < 50%.
+  const files = [
+    [done < total ? 'Checking ' + num(done) + ' / ' + num(total) + ' files…' : num(total)],
+    [num(tally.good) + ' green (>75%)', 'pct-good'],
+    [num(tally.mid) + ' orange (50–75%)', 'pct-mid'],
+    [num(tally.bad) + ' red (<50%)', 'pct-bad'],
+    [num(tally.driftedFiles) + ' with drifted claims', 'drifted']
+  ];
+  if (tally.none) files.push([num(tally.none) + ' no claims']);
+  if (tally.failed) files.push([num(tally.failed) + ' failed', 'pct-bad']);
+  box.append(line('Claims', claims), line('Files', files));
 }
 
 let runAllSeq = 0;
@@ -664,7 +717,8 @@ async function runAll(p, btn, err) {
   btn.textContent = 'Running…';
   err.textContent = '';
   const rows = openRunAllDialog(names);
-  const tally = {good: 0, mid: 0, bad: 0, none: 0, failed: 0};
+  const tally = {good: 0, mid: 0, bad: 0, none: 0, failed: 0,
+    claims: 0, true: 0, false: 0, drifted: 0, driftedFiles: 0};
   const scores = new Map();
   renderRunAllSummary(tally, names.length);
   const checkOne = async name => {
@@ -682,16 +736,27 @@ async function runAll(p, btn, err) {
     }
     if (seq !== runAllSeq) return;
     const row = rows.get(name);
+    const [, status, trueCell, falseCell, driftedCell, totalCell] = row.cells;
     if (data.error) {
       tally.failed++;
-      row.status.textContent = data.error;
-      row.status.className = 'pct-bad';
+      status.textContent = data.error;
+      status.className = 'pct-bad';
     } else {
+      row.data = data;
       scores.set(name, data);
       const pct = pctText(data);
-      row.status.textContent = pct.text;
-      row.status.className = pct.className;
-      row.counts.textContent = data.true + ' / ' + data.total;
+      status.textContent = pct.text;
+      status.className = pct.className;
+      trueCell.textContent = data.true;
+      falseCell.textContent = data.false;
+      driftedCell.textContent = data.drifted;
+      if (data.drifted) driftedCell.className = 'drifted';
+      totalCell.textContent = data.total;
+      tally.claims += data.total;
+      tally.true += data.true;
+      tally.false += data.false;
+      tally.drifted += data.drifted;
+      if (data.drifted) tally.driftedFiles++;
       if (pct.className === 'pct-good') tally.good++;
       else if (pct.className === 'pct-mid') tally.mid++;
       else if (pct.className === 'pct-bad') tally.bad++;
@@ -705,6 +770,10 @@ async function runAll(p, btn, err) {
   };
   await Promise.all(Array.from({length: Math.min(4, names.length)}, worker));
   if (seq !== runAllSeq) return;
+  if (!runAllSort) {
+    runAllSort = {col: 1, asc: true};
+    sortRunAllRows();
+  }
   claimScores = scores;
   claimScoresRoot = p.root;
   renderWorkspace(p, lastDef);
